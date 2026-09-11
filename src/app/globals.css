@@ -1,0 +1,351 @@
+@import "tailwindcss";
+
+:root {
+  /* Multigate Medical Supplies – hospital theme: blue & light blue */
+  --background: 199 40% 97%;
+  --foreground: 199 30% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 199 30% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 199 30% 15%;
+  --primary: 199 89% 42%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 199 55% 92%;
+  --secondary-foreground: 199 89% 28%;
+  --muted: 199 35% 94%;
+  --muted-foreground: 199 25% 42%;
+  --accent: 199 65% 90%;
+  --accent-foreground: 199 89% 28%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 199 30% 88%;
+  --input: 199 30% 88%;
+  --ring: 199 89% 42%;
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+.dark {
+  --background: 210 25% 8%;
+  --foreground: 199 20% 98%;
+  --card: 210 25% 10%;
+  --card-foreground: 199 20% 98%;
+  --popover: 210 25% 10%;
+  --popover-foreground: 199 20% 98%;
+  --primary: 199 89% 48%;
+  --primary-foreground: 210 25% 8%;
+  --secondary: 199 30% 18%;
+  --secondary-foreground: 199 20% 98%;
+  --muted: 199 25% 18%;
+  --muted-foreground: 199 15% 65%;
+  --accent: 199 40% 22%;
+  --accent-foreground: 199 20% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 199 25% 22%;
+  --input: 199 25% 22%;
+  --ring: 199 89% 48%;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  touch-action: manipulation;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Guaranteed blue theme – page and hero */
+.page-bg-light {
+  background-color: #dbeafe;
+}
+.hero-gradient {
+  background: linear-gradient(135deg, #0369a1 0%, #0284c7 40%, #0ea5e9 100%);
+}
+.hero-gradient-deep {
+  background: linear-gradient(160deg, #0c4a6e 0%, #0369a1 35%, #0284c7 100%);
+}
+.card-blue-border {
+  border-left: 4px solid #0284c7;
+}
+.btn-primary-blue {
+  background-color: #0284c7;
+  color: #fff;
+}
+.btn-primary-blue:hover {
+  background-color: #0369a1;
+}
+.text-brand {
+  color: #0369a1;
+}
+.bg-brand-subtle {
+  background-color: #e0f2fe;
+}
+/* Header nav: clear tab spacing so links don’t run together */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+@media (min-width: 768px) {
+  .header-nav {
+    gap: 2rem;
+  }
+}
+.header-nav-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  white-space: nowrap;
+  color: #334155;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+.header-nav-link:hover {
+  color: #0369a1 !important;
+  background-color: #e0f2fe !important;
+}
+/* Header icon buttons: consistent hover */
+.header-icon-btn:hover {
+  background-color: #e0f2fe !important;
+}
+/* Motion: smooth transitions for nav and interactive elements */
+.nav-motion {
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+.page-motion {
+  animation: page-in 0.25s ease-out;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* Mobile drawer motion */
+.mobile-drawer-backdrop {
+  animation: fade-in 0.2s ease-out;
+}
+.mobile-drawer-panel {
+  animation: slide-in-left 0.25s ease-out;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+
+/* Prevent unintended swipe gestures */
+.cart-sidebar {
+  touch-action: pan-y;
+}
+
+.cart-overlay {
+  touch-action: none;
+}
+
+/* Prevent swipe gestures on the entire page when cart is closed */
+body:not(.cart-open) {
+  touch-action: manipulation;
+}
+
+/* Ensure cart and mobile menu don't affect page layout */
+.cart-open,
+.menu-open {
+  overflow: hidden;
+}
+
+/* Ensure proper z-index stacking */
+.cart-sidebar {
+  position: fixed !important;
+  z-index: 9999 !important;
+  top: 0 !important;
+  right: 0 !important;
+  height: 100vh !important;
+  width: 100% !important;
+  max-width: 24rem !important;
+}
+
+.cart-overlay {
+  position: fixed !important;
+  z-index: 9998 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+/* Mobile menu - Following cart pattern exactly */
+.mobile-menu-overlay {
+  position: fixed !important;
+  z-index: 9998 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+.mobile-menu {
+  position: fixed !important;
+  z-index: 9999 !important;
+  top: 0 !important;
+  left: 0 !important;
+  height: 100vh !important;
+  width: 100% !important;
+  max-width: 24rem !important;
+}
+
+/* Ensure mobile menu is always visible when open */
+.mobile-menu.translate-x-0 {
+  transform: translateX(0) !important;
+}
+
+.mobile-menu.-translate-x-full {
+  transform: translateX(-100%) !important;
+}
+
+
+/* Prevent any horizontal swipe gestures */
+* {
+  touch-action: manipulation;
+}
+
+/* Debug: Make cart more visible */
+.cart-sidebar {
+  box-shadow: -10px 0 25px -3px rgba(0, 0, 0, 0.1), -10px 0 10px -3px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Ensure cart is always visible when open */
+.cart-sidebar.translate-x-0 {
+  transform: translateX(0) !important;
+}
+
+.cart-sidebar.translate-x-full {
+  transform: translateX(100%) !important;
+}
+
+body:not(.cart-open):not(.menu-open) {
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+select {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+/* Prevent horizontal scroll globally */
+html {
+  overflow-x: hidden;
+  position: relative;
+  max-width: 100%;
+}
+
+body {
+  max-width: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Keep tables usable on small screens without blowing layout */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+/* Containers stay within the viewport; do not shrink them twice */
+.container, .max-w-7xl, .max-w-6xl, .max-w-5xl, .max-w-4xl {
+  width: 100%;
+}
+
+/* Prevent any element from causing overflow */
+* {
+  box-sizing: border-box;
+}
+
+/* Mobile form improvements */
+@media (max-width: 640px) {
+  .checkout-form input,
+  .checkout-form select,
+  .checkout-form textarea,
+  main input,
+  main select,
+  main textarea,
+  form input,
+  form select,
+  form textarea {
+    max-width: 100%;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .checkout-form label {
+    margin-bottom: 8px !important;
+    display: block;
+  }
+
+  .checkout-form .grid {
+    gap: 1rem !important;
+  }
+}
+
+/* Allow only vertical scrolling in cart */
+.cart-sidebar * {
+  touch-action: pan-y;
+}
+
+/* Print-friendly styles for order success page */
+@media print {
+  .print\:hidden {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  * {
+    background: white !important;
+    color: black !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+  }
+  
+  .bg-green-50, .bg-gray-50, .bg-sky-100, .bg-blue-50 {
+    background: white !important;
+    border: 1px solid #ccc !important;
+  }
+  
+  .text-green-800, .text-sky-600, .text-blue-600, .text-gray-900 {
+    color: black !important;
+  }
+}

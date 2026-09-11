@@ -1,0 +1,16 @@
+{
+  "name": "Multigate Medical Supplies",
+  "short_name": "Multigate",
+  "description": "Your trusted source for medical supplies and equipment.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#dbeafe",
+  "theme_color": "#0369a1",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "32x32",
+      "type": "image/svg+xml"
+    }
+  ]
+}
