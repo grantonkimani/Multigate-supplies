@@ -28,9 +28,15 @@ function ProductCard({ product }: { product: ProductWithOffer }) {
   const { addItem } = useCart();
   const [added, setAdded] = useState(false);
   const offer = product.offer;
-  const hasOffer = Boolean(offer?.is_active);
-  const originalPrice = product.price;
-  const offerPrice = offer?.offer_price ?? 0;
+  const originalPrice = Number(product.price);
+  const offerPrice = Number(offer?.offer_price);
+  const hasOffer =
+    Boolean(offer) &&
+    offer?.is_active !== false &&
+    Number.isFinite(offerPrice) &&
+    offerPrice > 0 &&
+    Number.isFinite(originalPrice) &&
+    offerPrice < originalPrice;
   const cartPrice = hasOffer ? offerPrice : originalPrice;
   const outOfStock = Number(product.stock_quantity) <= 0;
 
@@ -48,7 +54,11 @@ function ProductCard({ product }: { product: ProductWithOffer }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-sky-100 shadow-sm overflow-hidden hover:shadow-md hover:border-sky-200 transition-shadow flex flex-col h-full">
+    <div
+      className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col h-full ${
+        hasOffer ? 'offer-card border-sky-500' : 'border-sky-100 hover:border-sky-200'
+      }`}
+    >
       <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
         {product.image_url ? (
           <StoreImage
@@ -64,12 +74,9 @@ function ProductCard({ product }: { product: ProductWithOffer }) {
           </div>
         )}
         {hasOffer && (
-          <span
-            className="absolute top-3 left-3 inline-flex items-center px-2.5 py-1 rounded-lg text-sm font-semibold text-sky-900"
-            style={{ backgroundColor: BLUE.light }}
-          >
-            -{offer?.percent_off ?? 0}%
-          </span>
+          <div className="offer-banner">
+            Offer · -{offer?.percent_off ?? 0}% off
+          </div>
         )}
       </div>
 

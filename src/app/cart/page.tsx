@@ -52,20 +52,30 @@ export default function CartPage() {
       .join('\n');
 
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_name: form.fullName.trim(),
-          customer_phone: form.phone.trim(),
-          customer_email: form.email.trim(),
-          shipping_address: shipping,
-          items: orderItems,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError((data.error as string) || 'Could not save order');
+      let data: { id?: string } = {};
+      let lastError = 'Could not save order';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch('/api/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_name: form.fullName.trim(),
+            customer_phone: form.phone.trim(),
+            customer_email: form.email.trim(),
+            shipping_address: shipping,
+            items: orderItems,
+          }),
+        });
+        data = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+        if (res.ok && data.id) break;
+        lastError = (data as { error?: string }).error || lastError;
+        if (attempt === 1) {
+          setError(lastError);
+          return;
+        }
+      }
+      if (!data.id) {
+        setError(lastError);
         return;
       }
 

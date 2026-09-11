@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2, Image as ImageIcon } from 'lucide-react';
+import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
 import type { Product, Category } from '@/lib/types';
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedProducts = peekAdminJson<Product[]>('/api/admin/products');
+  const cachedCategories = peekAdminJson<Category[]>('/api/admin/categories');
+  const [products, setProducts] = useState<Product[]>(Array.isArray(cachedProducts) ? cachedProducts : []);
+  const [categories, setCategories] = useState<Category[]>(Array.isArray(cachedCategories) ? cachedCategories : []);
+  const [loading, setLoading] = useState(!Array.isArray(cachedProducts));
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState({
@@ -24,20 +27,21 @@ export default function AdminProductsPage() {
   const [error, setError] = useState('');
 
   function fetchData() {
-    Promise.all([
-      fetch('/api/admin/products').then((r) => r.json()),
-      fetch('/api/admin/categories').then((r) => r.json()),
-    ])
+    Promise.all([adminJson<Product[]>('/api/admin/products', true), adminJson<Category[]>('/api/admin/categories', true)])
       .then(([p, c]) => {
-        setProducts(Array.isArray(p) ? p : []);
-        setCategories(Array.isArray(c) ? c : []);
-        if (Array.isArray(c) && c[0]) {
-          setForm((f) => (f.category_id === '' ? { ...f, category_id: c[0].id } : f));
+        const productsList = Array.isArray(p) ? p : [];
+        const categoriesList = Array.isArray(c) ? c : [];
+        setProducts(productsList);
+        setCategories(categoriesList);
+        putAdminJson('/api/admin/products', productsList);
+        putAdminJson('/api/admin/categories', categoriesList);
+        if (categoriesList[0]) {
+          setForm((f) => (f.category_id === '' ? { ...f, category_id: categoriesList[0].id } : f));
         }
       })
       .catch(() => {
-        setProducts([]);
-        setCategories([]);
+        if (!products.length) setProducts([]);
+        if (!categories.length) setCategories([]);
       })
       .finally(() => setLoading(false));
   }
@@ -341,7 +345,15 @@ export default function AdminProductsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {p.image_url ? (
-                          <img src={p.image_url} alt="" className="w-12 h-12 object-cover rounded-lg" loading="lazy" decoding="async" />
+                          <img
+                            src={p.image_url}
+                            alt=""
+                            width={48}
+                            height={48}
+                            className="w-12 h-12 object-cover rounded-lg bg-slate-100"
+                            loading="lazy"
+                            decoding="async"
+                          />
                         ) : (
                           <div className="w-12 h-12 rounded-lg bg-slate-200 flex items-center justify-center">
                             <ImageIcon className="w-6 h-6 text-slate-400" />

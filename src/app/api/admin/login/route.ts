@@ -1,43 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { createAdminSessionToken } from '@/lib/admin-auth';
-
-const SESSION_COOKIE = 'admin-session';
-const MAX_AGE = 8 * 60 * 60; // 8 hours
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_MAX_AGE,
+  createAdminSessionToken,
+  resolveAdminPasswordHash,
+} from '@/lib/admin-auth';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password } = body;
+    const username = typeof body.username === 'string' ? body.username : typeof body.email === 'string' ? body.email : '';
+    const password = body.password;
 
-    const adminEmail = process.env.ADMIN_EMAIL;
-    const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+    const adminUser = process.env.ADMIN_USERNAME || process.env.ADMIN_EMAIL;
+    const hash = resolveAdminPasswordHash(process.env.ADMIN_PASSWORD_HASH);
 
-    if (!adminEmail || !adminPasswordHash) {
+    if (!adminUser || !hash) {
       return NextResponse.json(
-        { error: 'Admin login not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD_HASH in .env.local' },
+        { error: 'Admin login not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD_HASH in .env.local' },
         { status: 503 }
       );
     }
 
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
+    if (!username || !password) {
+      return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
     }
 
-    const emailMatch = email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
-    const passwordValid = await bcrypt.compare(password, adminPasswordHash);
+    const userMatch = username.trim().toLowerCase() === adminUser.trim().toLowerCase();
+    const passwordValid = await bcrypt.compare(password, hash);
 
-    if (!emailMatch || !passwordValid) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+    if (!userMatch || !passwordValid) {
+      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
     }
 
     const token = await createAdminSessionToken();
     const res = NextResponse.json({ success: true });
-    res.cookies.set(SESSION_COOKIE, token, {
+    res.cookies.set(ADMIN_SESSION_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: MAX_AGE,
+      maxAge: ADMIN_SESSION_MAX_AGE,
       path: '/',
     });
     return res;

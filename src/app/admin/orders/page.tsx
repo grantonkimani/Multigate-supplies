@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
 import type { Order } from '@/lib/types';
 
 const STATUSES = ['pending', 'paid', 'delivered', 'cancelled'] as const;
@@ -13,24 +14,23 @@ function statusClass(status: string) {
 }
 
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = peekAdminJson<Order[]>('/api/admin/orders');
+  const [orders, setOrders] = useState<Order[]>(Array.isArray(cached) ? cached : []);
+  const [loading, setLoading] = useState(!Array.isArray(cached));
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const loadOrders = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    const ctrl = new AbortController();
-    const timer = window.setTimeout(() => ctrl.abort(), 12000);
+      if (!silent && !peekAdminJson('/api/admin/orders')) setLoading(true);
     try {
-      const r = await fetch('/api/admin/orders', { cache: 'no-store', signal: ctrl.signal });
-      const data = await r.json();
-      setOrders(Array.isArray(data) ? data : []);
+      const data = await adminJson<Order[]>('/api/admin/orders', true);
+      const list = Array.isArray(data) ? data : [];
+      setOrders(list);
+      putAdminJson('/api/admin/orders', list);
     } catch {
-      if (!silent) setOrders([]);
+      if (!silent) setOrders((prev) => prev);
     } finally {
-      window.clearTimeout(timer);
       setLoading(false);
     }
   }, []);

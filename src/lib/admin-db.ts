@@ -384,10 +384,15 @@ export async function getProducts(): Promise<Product[]> {
   }
   const supabase = dataWriteClient();
   if (supabase) {
-    const { data, error } = await supabase
-      .from('products')
-      .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
-      .order('created_at', { ascending: false });
+    const { data, error } = await queryWithAbort(
+      (signal) =>
+        supabase
+          .from('products')
+          .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
+          .order('created_at', { ascending: false })
+          .abortSignal(signal),
+      800
+    );
     if (!error && (data?.length ?? 0) > 0) {
       return (data ?? []).map((p: any) => ({
         ...p,
@@ -579,8 +584,31 @@ function computePercentOff(originalPrice: number, offerPrice: number): number {
 export async function getOffersByProductIds(productIds: string[]): Promise<Offer[]> {
   if (!productIds.length) return [];
   hydrate();
-  const byId = new Set(productIds);
-  return memory.offers.filter((o) => byId.has(o.product_id));
+  const wanted = new Set(productIds);
+  const byId = new Map<string, Offer>();
+  for (const o of memory.offers) {
+    if (wanted.has(o.product_id)) byId.set(o.product_id, o);
+  }
+  const supabase = dataWriteClient();
+  if (supabase) {
+    const { data, error } = await queryWithAbort(
+      (signal) => supabase.from('offers').select('*').in('product_id', productIds).abortSignal(signal),
+      800
+    );
+    if (!error && data) {
+      for (const row of data as Offer[]) {
+        byId.set(String(row.product_id), {
+          product_id: String(row.product_id),
+          offer_price: Number(row.offer_price),
+          percent_off: Number(row.percent_off),
+          is_active: Boolean(row.is_active),
+          created_at: String(row.created_at),
+          updated_at: String(row.updated_at),
+        });
+      }
+    }
+  }
+  return Array.from(byId.values());
 }
 
 export async function getActiveOffersByProductIds(productIds: string[]): Promise<Record<string, ProductOffer>> {
@@ -639,17 +667,17 @@ export async function upsertOffersForProducts(input: {
     };
   });
 
-  const supabase = createClient();
+  const supabase = dataWriteClient();
   if (supabase) {
     const payload = records.map((r) => ({
       product_id: r.product_id,
       offer_price: r.offer_price,
       percent_off: r.percent_off,
       is_active: r.is_active,
-      updated_at: new Date().toISOString(),
+      updated_at: r.updated_at,
     }));
     const { error } = await supabase.from('offers').upsert(payload, { onConflict: 'product_id' });
-    if (!error) return records;
+    if (error) console.error('upsertOffersForProducts', error.message);
   }
 
   return localWrite(() => {
@@ -663,24 +691,13 @@ export async function upsertOffersForProducts(input: {
 }
 
 export async function setOfferActive(product_id: string, is_active: boolean): Promise<Offer | null> {
-  const supabase = createClient();
+  const supabase = dataWriteClient();
   if (supabase) {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('offers')
       .update({ is_active, updated_at: new Date().toISOString() })
-      .eq('product_id', product_id)
-      .select()
-      .single();
-    if (!error && data) {
-      return {
-        product_id: String((data as any).product_id),
-        offer_price: Number((data as any).offer_price),
-        percent_off: Number((data as any).percent_off),
-        is_active: Boolean((data as any).is_active),
-        created_at: String((data as any).created_at),
-        updated_at: String((data as any).updated_at),
-      };
-    }
+      .eq('product_id', product_id);
+    if (error) console.error('setOfferActive', error.message);
   }
 
   return localWrite(() => {
@@ -692,10 +709,10 @@ export async function setOfferActive(product_id: string, is_active: boolean): Pr
 }
 
 export async function deleteOffer(product_id: string): Promise<boolean> {
-  const supabase = createClient();
+  const supabase = dataWriteClient();
   if (supabase) {
     const { error } = await supabase.from('offers').delete().eq('product_id', product_id);
-    if (!error) return true;
+    if (error) console.error('deleteOffer', error.message);
   }
   return localWrite(() => {
     const idx = memory.offers.findIndex((o) => o.product_id === product_id);
@@ -857,7 +874,7 @@ export async function getOrders(): Promise<Order[]> {
     const { data, error } = await queryWithAbort(
       (signal) =>
         supabase.from('orders').select('*').order('created_at', { ascending: false }).abortSignal(signal),
-      4000
+      700
     );
     if (error && !isAbortError(error)) console.error('getOrders', error.message);
     if (!error && data) {
@@ -880,49 +897,56 @@ export async function createOrder(input: {
   status?: string;
 }): Promise<Order> {
   const now = new Date().toISOString();
+  const order: Order & { id: string } = {
+    id: uuid(),
+    customer_name: input.customer_name,
+    customer_email: input.customer_email,
+    customer_phone: input.customer_phone ?? null,
+    shipping_address: input.shipping_address,
+    items: input.items,
+    subtotal: input.subtotal,
+    total: input.total,
+    status: input.status ?? 'pending',
+    created_at: now,
+    updated_at: now,
+  };
+
+  localWrite(() => {
+    if (!memory.orders.some((o) => o.id === order.id)) {
+      memory.orders.unshift(order);
+    }
+    return order;
+  });
+
   const supabase = dataWriteClient();
   if (supabase) {
-    try {
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        customer_name: input.customer_name,
-        customer_email: input.customer_email,
-        customer_phone: input.customer_phone ?? null,
-        shipping_address: input.shipping_address,
-        items: input.items,
-        subtotal: input.subtotal,
-        total: input.total,
-        status: input.status ?? 'pending',
-      })
-      .select()
-      .single();
-    if (error) console.error('createOrder', error.message);
-    if (!error && data) {
-      const order = data as Order;
-      return localWrite(() => {
-        if (!memory.orders.some((o) => o.id === order.id)) {
-          memory.orders.unshift(order as Order & { id: string });
-        }
-        return order;
-      });
-    }
-    } catch (e) {
+    void queryWithAbort(
+      (signal) =>
+        supabase
+          .from('orders')
+          .insert({
+            id: order.id,
+            customer_name: order.customer_name,
+            customer_email: order.customer_email,
+            customer_phone: order.customer_phone,
+            shipping_address: order.shipping_address,
+            items: order.items,
+            subtotal: order.subtotal,
+            total: order.total,
+            status: order.status,
+            created_at: order.created_at,
+            updated_at: order.updated_at,
+          })
+          .abortSignal(signal),
+      2500
+    ).then(({ error }) => {
+      if (error && !isAbortError(error)) console.error('createOrder', error.message);
+    }).catch((e) => {
       console.error('createOrder', e);
-    }
+    });
   }
-  return localWrite(() => {
-    const newOrder: Order & { id: string } = {
-      id: uuid(),
-      ...input,
-      customer_phone: input.customer_phone ?? null,
-      status: input.status ?? 'pending',
-      created_at: now,
-      updated_at: now,
-    };
-    memory.orders.push(newOrder);
-    return newOrder as Order;
-  });
+
+  return order;
 }
 
 const ORDER_STATUSES = ['pending', 'paid', 'delivered', 'cancelled'] as const;

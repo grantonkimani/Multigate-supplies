@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Home,
   Package,
@@ -16,6 +16,7 @@ import {
   LogOut,
   Image as ImageIcon,
 } from 'lucide-react';
+import { prefetchAdminTabs } from '@/lib/admin-client-cache';
 
 const navItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: Home },
@@ -32,6 +33,10 @@ const navItems = [
 export function AdminNav() {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    prefetchAdminTabs();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -55,6 +60,7 @@ export function AdminNav() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch
                     className={`inline-flex items-center gap-2 px-4 py-3.5 border-b-2 font-medium text-sm transition-colors ${
                       isActive
                         ? 'border-sky-600 text-sky-700 bg-sky-50/80'

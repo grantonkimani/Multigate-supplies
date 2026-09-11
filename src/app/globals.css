@@ -90,6 +90,39 @@ body {
 .bg-brand-subtle {
   background-color: #e0f2fe;
 }
+
+@keyframes offer-banner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+.offer-card {
+  border-color: #0284c7 !important;
+  box-shadow: 0 0 0 1px #7dd3fc;
+}
+.offer-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  background: linear-gradient(90deg, #0369a1 0%, #0284c7 50%, #0ea5e9 100%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  animation: offer-banner-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .offer-banner {
+    animation: none;
+  }
+}
 /* Header nav: clear tab spacing so links don’t run together */
 .header-nav {
   display: flex;
