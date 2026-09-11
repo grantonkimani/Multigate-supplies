@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Plus, Pencil, Trash2, Image as ImageIcon } from 'lucide-react';
 import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
 import type { Product, Category } from '@/lib/types';
@@ -25,6 +25,8 @@ export default function AdminProductsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [visibleCount, setVisibleCount] = useState(40);
 
   function fetchData() {
     Promise.all([adminJson<Product[]>('/api/admin/products', true), adminJson<Category[]>('/api/admin/categories', true)])
@@ -97,6 +99,14 @@ export default function AdminProductsPage() {
           setError(d.error || 'Update failed');
           return;
         }
+        const updated = await res.json().catch(() => null);
+        if (updated?.id) {
+          setProducts((prev) => {
+            const next = prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p));
+            putAdminJson('/api/admin/products', next);
+            return next;
+          });
+        }
       } else {
         const res = await fetch('/api/admin/products', {
           method: 'POST',
@@ -108,9 +118,16 @@ export default function AdminProductsPage() {
           setError(d.error || 'Create failed');
           return;
         }
+        const created = await res.json().catch(() => null);
+        if (created?.id) {
+          setProducts((prev) => {
+            const next = [created as Product, ...prev.filter((p) => p.id !== created.id)];
+            putAdminJson('/api/admin/products', next);
+            return next;
+          });
+        }
       }
       resetForm();
-      fetchData();
     } catch {
       setError('Request failed');
     } finally {
@@ -128,7 +145,11 @@ export default function AdminProductsPage() {
         setError((d.error as string) || 'Delete failed');
         return;
       }
-      setProducts((prev) => prev.filter((p) => p.id !== product.id));
+      setProducts((prev) => {
+        const next = prev.filter((p) => p.id !== product.id);
+        putAdminJson('/api/admin/products', next);
+        return next;
+      });
     } catch {
       setError('Delete failed');
     }
@@ -168,14 +189,43 @@ export default function AdminProductsPage() {
     }
   }
 
+  function startEdit(p: Product) {
+    setEditing(p);
+    setShowForm(false);
+    setForm({
+      category_id: p.category_id,
+      name: p.name,
+      description: p.description ?? '',
+      price: String(p.price),
+      image_url: p.image_url ?? '',
+      image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
+      stock_quantity: String(p.stock_quantity),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   const previewUrls = [form.image_url, ...form.image_urls].filter((u, i, arr) => u && arr.indexOf(u) === i);
+
+  const filteredProducts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.description ?? '').toLowerCase().includes(q)
+    );
+  }, [products, search]);
+  const shownProducts = filteredProducts.slice(0, visibleCount);
 
   if (loading) return <p className="text-slate-500 py-8">Loading…</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-3">
-        <h2 className="font-semibold text-slate-900">Products</h2>
+        <div>
+          <h2 className="font-semibold text-slate-900">Products</h2>
+          <p className="text-sm text-slate-500">{filteredProducts.length} product(s)</p>
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -329,7 +379,67 @@ export default function AdminProductsPage() {
           <p className="p-8 text-slate-500 text-center">No products yet. Add a category first, then add products.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <div className="p-3 border-b border-sky-100">
+              <input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setVisibleCount(40);
+                }}
+                placeholder="Search products"
+                className="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              />
+            </div>
+            <div className="md:hidden divide-y divide-slate-100">
+              {shownProducts.map((p) => (
+                <div key={p.id} className="p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    {p.image_url ? (
+                      <img
+                        src={p.image_url}
+                        alt=""
+                        width={56}
+                        height={56}
+                        className="w-14 h-14 object-cover rounded-lg bg-slate-100 shrink-0"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-lg bg-slate-200 flex items-center justify-center shrink-0">
+                        <ImageIcon className="w-6 h-6 text-slate-400" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-slate-900">{p.name}</p>
+                      <p className="text-sm text-slate-500">
+                        {(p as Product & { category?: Category }).category?.name ?? '—'}
+                      </p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1">KES {p.price.toLocaleString()}</p>
+                      <p className="text-sm text-slate-500">Stock {p.stock_quantity}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(p)}
+                      className="inline-flex items-center justify-center gap-2 min-h-11 rounded-lg bg-sky-600 text-white text-sm font-semibold"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(p)}
+                      className="inline-flex items-center justify-center gap-2 min-h-11 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-semibold"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <table className="hidden md:table w-full text-left">
               <thead>
                 <tr className="border-b border-sky-200 bg-sky-50/80">
                   <th className="px-4 py-3 text-sm font-semibold text-slate-800">Product</th>
@@ -340,7 +450,7 @@ export default function AdminProductsPage() {
                 </tr>
               </thead>
               <tbody>
-                {products.map((p) => (
+                {shownProducts.map((p) => (
                   <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -368,40 +478,43 @@ export default function AdminProductsPage() {
                     <td className="px-4 py-3 text-sm text-slate-600">{(p as Product & { category?: Category }).category?.name ?? '—'}</td>
                     <td className="px-4 py-3 font-medium text-slate-900">KES {p.price.toLocaleString()}</td>
                     <td className="px-4 py-3 text-slate-600">{p.stock_quantity}</td>
-                    <td className="px-4 py-3 flex gap-2 shrink-0">
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => {
-                          setEditing(p);
-                          setShowForm(false);
-                          setForm({
-                            category_id: p.category_id,
-                            name: p.name,
-                            description: p.description ?? '',
-                            price: String(p.price),
-                            image_url: p.image_url ?? '',
-                            image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
-                            stock_quantity: String(p.stock_quantity),
-                          });
-                        }}
-                        className="p-1.5 text-slate-500 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
+                        onClick={() => startEdit(p)}
+                        className="p-2 text-sky-700 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
                         title="Edit"
+                        aria-label={`Edit ${p.name}`}
                       >
-                        <Pencil className="w-4 h-4" />
+                        <Pencil className="w-5 h-5" />
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDelete(p)}
-                        className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded"
+                        className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
                         title="Delete"
+                        aria-label={`Delete ${p.name}`}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-5 h-5" />
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {filteredProducts.length > visibleCount && (
+              <div className="p-3 border-t border-sky-100">
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((n) => n + 40)}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg border border-sky-200 text-sky-800 hover:bg-sky-50"
+                >
+                  Show more ({filteredProducts.length - visibleCount} remaining)
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
