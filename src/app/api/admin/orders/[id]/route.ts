@@ -17,19 +17,19 @@ export async function PATCH(
     const body = await request.json();
     const status = typeof body.status === 'string' ? body.status.trim() : '';
     const existing = (await getOrders()).find((o) => o.id === id);
-    const wasPaid =
-      !!existing &&
-      (existing.status === 'paid' ||
-        existing.status === 'out_for_delivery' ||
-        existing.status === 'delivered');
     const order = await updateOrderStatus(id, status);
     if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+    const notify =
+      status === 'paid' || status === 'out_for_delivery' || status === 'delivered'
+        ? (status as 'paid' | 'out_for_delivery' | 'delivered')
+        : null;
+
     let email_sent = false;
     let email_note = '';
-    if (wasPaid && (status === 'out_for_delivery' || status === 'delivered')) {
+    if (notify && existing?.status !== notify) {
       try {
-        const result = await sendOrderStatusEmail(order, status);
+        const result = await sendOrderStatusEmail(order, notify);
         email_sent = result.sent;
         email_note = result.note;
       } catch (mailError) {

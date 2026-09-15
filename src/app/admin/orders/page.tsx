@@ -20,6 +20,7 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(!Array.isArray(cached));
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const loadOrders = useCallback(async (silent = false) => {
@@ -53,6 +54,7 @@ export default function AdminOrdersPage() {
   async function handleStatusChange(order: Order, status: string) {
     if (status === order.status) return;
     setError('');
+    setNote('');
     setUpdatingId(order.id);
     try {
       const res = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}`, {
@@ -76,6 +78,9 @@ export default function AdminOrdersPage() {
         putAdminJson('/api/admin/orders', next);
         return next;
       });
+      if (typeof data.email_note === 'string' && data.email_note) {
+        setNote(data.email_note);
+      }
     } catch {
       setError('Could not update status');
     } finally {
@@ -92,6 +97,9 @@ export default function AdminOrdersPage() {
           {error}
         </p>
       )}
+      {note && (
+        <p className="text-sm text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">{note}</p>
+      )}
       <div className="bg-white rounded-2xl border-2 border-sky-100 shadow-sm overflow-hidden">
         <div className="px-4 sm:px-5 py-4 border-b border-sky-100 bg-sky-50">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -99,7 +107,7 @@ export default function AdminOrdersPage() {
               <h2 className="font-semibold text-slate-900">All orders</h2>
               <p className="text-sm text-sky-700">{orders.length} order(s)</p>
               <p className="text-xs text-slate-500 mt-1">
-                New WhatsApp checkouts start as pending. Set to paid after the customer pays you.
+                New WhatsApp checkouts start as pending. Set to paid after the customer pays you. That emails them a thank-you if they gave a real email.
               </p>
             </div>
             <button
