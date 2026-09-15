@@ -19,9 +19,9 @@ export function adminJson<T>(url: string, force = false): Promise<T> {
   if (!force) {
     const hit = cache.get(url);
     if (hit && Date.now() - hit.at < 20_000) return Promise.resolve(hit.data as T);
+    const existing = inflight.get(url);
+    if (existing) return existing as Promise<T>;
   }
-  const existing = inflight.get(url);
-  if (existing) return existing as Promise<T>;
 
   const request = fetch(url, { cache: 'no-store' })
     .then(async (res) => {

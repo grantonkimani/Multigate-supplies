@@ -7,7 +7,7 @@ import { Footer } from '@/components/Footer';
 import { StoreImage } from '@/components/StoreImage';
 import { useCart } from '@/contexts/CartContext';
 
-const WHATSAPP_NUMBER = '254706893433';
+const WHATSAPP_NUMBER = '254115970558';
 
 export default function CartPage() {
   const { state, removeItem, updateQuantity, getTotalPrice, clearCart } = useCart();

@@ -21,7 +21,79 @@ function hydrate() {
   memory.offers = disk.offers;
 }
 
+function orderStamp(order: { updated_at?: string; created_at?: string }) {
+  return String(order.updated_at || order.created_at || '');
+}
+
+function normalizeItems(items: unknown): OrderItem[] {
+  let parsed: unknown = items;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((row) => {
+      const quantity = Math.max(1, Number((row as { quantity?: unknown })?.quantity) || 1);
+      const unit_price = Number(
+        (row as { unit_price?: unknown; price?: unknown })?.unit_price ??
+          (row as { price?: unknown })?.price
+      );
+      const totalRaw = Number((row as { total?: unknown })?.total);
+      const name = String(
+        (row as { product_name?: unknown; name?: unknown })?.product_name ??
+          (row as { name?: unknown })?.name ??
+          ''
+      ).trim();
+      return {
+        product_id: String((row as { product_id?: unknown })?.product_id ?? ''),
+        product_name: name,
+        quantity,
+        unit_price: Number.isFinite(unit_price) ? unit_price : 0,
+        total: Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : (Number.isFinite(unit_price) ? unit_price : 0) * quantity,
+      };
+    })
+    .filter((item) => item.product_name);
+}
+
+function normalizeOrder(row: Order): Order {
+  return {
+    ...row,
+    items: normalizeItems((row as Order).items),
+  };
+}
+
+function mergeOrder(prev: Order | undefined, next: Order): Order {
+  const a = prev ? normalizeOrder(prev) : undefined;
+  const b = normalizeOrder(next);
+  if (!a) return b;
+  const newer = orderStamp(b) >= orderStamp(a) ? b : a;
+  const older = newer === b ? a : b;
+  return {
+    ...older,
+    ...newer,
+    items: newer.items.length ? newer.items : older.items,
+  };
+}
+
 function persist() {
+  const disk = loadLocalStore();
+  const byId = new Map<string, Order & { id: string }>();
+  for (const row of disk.orders) {
+    const merged = mergeOrder(undefined, row) as Order & { id: string };
+    byId.set(merged.id, merged);
+  }
+  for (const row of memory.orders) {
+    const prev = byId.get(row.id);
+    const merged = mergeOrder(prev, row) as Order & { id: string };
+    byId.set(merged.id, merged);
+  }
+  memory.orders = Array.from(byId.values()).sort((a, b) =>
+    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+  );
   saveLocalStore(memory);
 }
 
@@ -376,11 +448,15 @@ export async function getActiveBanners(): Promise<Banner[]> {
 // ---- Products ----
 export async function getProducts(): Promise<Product[]> {
   hydrate();
-  if (memory.products.length) {
-    return memory.products.map((p) => ({
+  const catById = new Map(memory.categories.map((c) => [c.id, c]));
+  const withCategory = (list: typeof memory.products) =>
+    list.map((p) => ({
       ...p,
-      category: memory.categories.find((c) => c.id === p.category_id),
+      category: catById.get(p.category_id),
     })) as Product[];
+
+  if (memory.products.length) {
+    return withCategory(memory.products);
   }
   const supabase = dataWriteClient();
   if (supabase) {
@@ -391,21 +467,18 @@ export async function getProducts(): Promise<Product[]> {
           .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
           .order('created_at', { ascending: false })
           .abortSignal(signal),
-      800
+      2500
     );
     if (!error && (data?.length ?? 0) > 0) {
       return (data ?? []).map((p: any) => ({
         ...p,
         price: Number(p.price),
         stock_quantity: Number(p.stock_quantity),
-        category: memory.categories.find((c) => c.id === p.category_id),
+        category: catById.get(p.category_id),
       })) as Product[];
     }
   }
-  return memory.products.map((p) => ({
-    ...p,
-    category: memory.categories.find((c) => c.id === p.category_id),
-  })) as Product[];
+  return withCategory(memory.products);
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
@@ -424,59 +497,56 @@ export async function createProduct(input: {
 }): Promise<Product> {
   const slug = input.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
   const now = new Date().toISOString();
+  const product: Product & { id: string } = {
+    id: uuid(),
+    category_id: input.category_id,
+    name: input.name,
+    slug,
+    description: input.description ?? null,
+    price: input.price,
+    image_url: input.image_url ?? null,
+    image_urls: input.image_urls ?? null,
+    stock_quantity: input.stock_quantity ?? 0,
+    is_active: true,
+    created_at: now,
+    updated_at: now,
+  };
+
+  localWrite(() => {
+    if (!memory.products.some((p) => p.id === product.id)) {
+      memory.products.unshift(product);
+    }
+    return product;
+  });
+
   const supabase = dataWriteClient();
   if (supabase) {
-    const { data, error } = await supabase
-      .from('products')
-      .insert({
-        category_id: input.category_id,
-        name: input.name,
-        slug,
-        description: input.description ?? null,
-        price: input.price,
-        image_url: input.image_url ?? null,
-        image_urls: input.image_urls ?? null,
-        stock_quantity: input.stock_quantity ?? 0,
-        is_active: true,
-      })
-      .select()
-      .single();
-    if (error) {
-      console.error('createProduct', error.message);
-      throw new Error(error.message);
-    }
-    if (data) {
-      const mapped = {
-        ...(data as Product & { price: unknown; stock_quantity: unknown }),
-        price: Number((data as any).price),
-        stock_quantity: Number((data as any).stock_quantity),
-      } as Product;
-      return localWrite(() => {
-        if (!memory.products.some((p) => p.id === mapped.id)) {
-          memory.products.push(mapped as Product & { id: string });
-        }
-        return mapped;
-      });
-    }
+    void queryWithAbort(
+      (signal) =>
+        supabase
+          .from('products')
+          .insert({
+            id: product.id,
+            category_id: product.category_id,
+            name: product.name,
+            slug: product.slug,
+            description: product.description,
+            price: product.price,
+            image_url: product.image_url,
+            image_urls: product.image_urls,
+            stock_quantity: product.stock_quantity,
+            is_active: true,
+            created_at: product.created_at,
+            updated_at: product.updated_at,
+          })
+          .abortSignal(signal),
+      2500
+    ).then(({ error }) => {
+      if (error && !isAbortError(error)) console.error('createProduct', error.message);
+    });
   }
-  return localWrite(() => {
-    const newProduct: Product & { id: string } = {
-      id: uuid(),
-      category_id: input.category_id,
-      name: input.name,
-      slug,
-      description: input.description ?? null,
-      price: input.price,
-      image_url: input.image_url ?? null,
-      image_urls: input.image_urls ?? null,
-      stock_quantity: input.stock_quantity ?? 0,
-      is_active: true,
-      created_at: now,
-      updated_at: now,
-    };
-    memory.products.push(newProduct);
-    return newProduct as Product;
-  });
+
+  return product;
 }
 
 function productUpdatePatch(
@@ -588,6 +658,9 @@ export async function getOffersByProductIds(productIds: string[]): Promise<Offer
   const byId = new Map<string, Offer>();
   for (const o of memory.offers) {
     if (wanted.has(o.product_id)) byId.set(o.product_id, o);
+  }
+  if (memory.offers.length > 0) {
+    return Array.from(byId.values());
   }
   const supabase = dataWriteClient();
   if (supabase) {
@@ -737,11 +810,12 @@ export async function getActiveProductsPage(input: {
   const fetchLimit = limit + 1; // for hasMore
 
   hydrate();
+  const catById = new Map(memory.categories.map((c) => [c.id, c]));
   const slug = (input.category_slug ?? '').trim().toLowerCase();
   const matchesCategory = (p: Product) => {
     if (!input.category_id && !slug) return true;
     if (input.category_id && p.category_id === input.category_id) return true;
-    const cat = memory.categories.find((c) => c.id === p.category_id);
+    const cat = catById.get(p.category_id);
     if (slug && cat?.slug === slug) return true;
     return false;
   };
@@ -754,7 +828,7 @@ export async function getActiveProductsPage(input: {
   if (memory.products.length > 0) {
     const localProducts = localFiltered.slice(offset, offset + fetchLimit).map((p) => ({
       ...p,
-      category: memory.categories.find((c) => c.id === p.category_id),
+      category: catById.get(p.category_id),
     }));
     const hasMore = localProducts.length > limit;
     const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
@@ -803,7 +877,8 @@ async function attachOffers(
 
   const items: ProductWithOffer[] = pageProducts.map((p) => {
     const offer = offersByProductId[p.id];
-    return offer ? ({ ...(p as any), offer } as ProductWithOffer) : (p as ProductWithOffer);
+    const { image_urls: _urls, ...rest } = p as Product & { category?: Category; image_urls?: string[] | null };
+    return offer ? ({ ...rest, offer } as ProductWithOffer) : (rest as ProductWithOffer);
   });
   return { items, hasMore };
 }
@@ -866,24 +941,32 @@ export async function getOffersAdminRows(): Promise<
 // ---- Orders ----
 export async function getOrders(): Promise<Order[]> {
   hydrate();
-  const local = [...(memory.orders as Order[])];
   const byId = new Map<string, Order>();
-  for (const o of local) byId.set(o.id, o);
+  for (const o of memory.orders as Order[]) {
+    const merged = mergeOrder(byId.get(o.id), o);
+    byId.set(merged.id, merged);
+  }
   const supabase = dataWriteClient();
   if (supabase) {
     const { data, error } = await queryWithAbort(
       (signal) =>
         supabase.from('orders').select('*').order('created_at', { ascending: false }).abortSignal(signal),
-      700
+      4000
     );
     if (error && !isAbortError(error)) console.error('getOrders', error.message);
     if (!error && data) {
-      for (const o of data as Order[]) byId.set(o.id, o);
+      for (const o of data as Order[]) {
+        const merged = mergeOrder(byId.get(o.id), o);
+        byId.set(merged.id, merged);
+      }
     }
   }
-  return Array.from(byId.values()).sort((a, b) =>
+  const orders = Array.from(byId.values()).sort((a, b) =>
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   );
+  memory.orders = orders as (Order & { id: string })[];
+  persist();
+  return orders;
 }
 
 export async function createOrder(input: {
@@ -903,7 +986,7 @@ export async function createOrder(input: {
     customer_email: input.customer_email,
     customer_phone: input.customer_phone ?? null,
     shipping_address: input.shipping_address,
-    items: input.items,
+    items: normalizeItems(input.items),
     subtotal: input.subtotal,
     total: input.total,
     status: input.status ?? 'pending',
@@ -912,44 +995,47 @@ export async function createOrder(input: {
   };
 
   localWrite(() => {
-    if (!memory.orders.some((o) => o.id === order.id)) {
-      memory.orders.unshift(order);
-    }
-    return order;
+    const existing = memory.orders.find((o) => o.id === order.id);
+    const merged = mergeOrder(existing, order) as Order & { id: string };
+    const idx = memory.orders.findIndex((o) => o.id === order.id);
+    if (idx === -1) memory.orders.unshift(merged);
+    else memory.orders[idx] = merged;
+    return merged;
   });
 
   const supabase = dataWriteClient();
   if (supabase) {
-    void queryWithAbort(
-      (signal) =>
-        supabase
-          .from('orders')
-          .insert({
-            id: order.id,
-            customer_name: order.customer_name,
-            customer_email: order.customer_email,
-            customer_phone: order.customer_phone,
-            shipping_address: order.shipping_address,
-            items: order.items,
-            subtotal: order.subtotal,
-            total: order.total,
-            status: order.status,
-            created_at: order.created_at,
-            updated_at: order.updated_at,
-          })
-          .abortSignal(signal),
-      2500
-    ).then(({ error }) => {
+    try {
+      const { error } = await queryWithAbort(
+        (signal) =>
+          supabase
+            .from('orders')
+            .insert({
+              id: order.id,
+              customer_name: order.customer_name,
+              customer_email: order.customer_email,
+              customer_phone: order.customer_phone,
+              shipping_address: order.shipping_address,
+              items: order.items,
+              subtotal: order.subtotal,
+              total: order.total,
+              status: order.status,
+              created_at: order.created_at,
+              updated_at: order.updated_at,
+            })
+            .abortSignal(signal),
+        8000
+      );
       if (error && !isAbortError(error)) console.error('createOrder', error.message);
-    }).catch((e) => {
+    } catch (e) {
       console.error('createOrder', e);
-    });
+    }
   }
 
   return order;
 }
 
-const ORDER_STATUSES = ['pending', 'paid', 'delivered', 'cancelled'] as const;
+const ORDER_STATUSES = ['pending', 'paid', 'out_for_delivery', 'delivered', 'cancelled'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export async function updateOrderStatus(id: string, status: string): Promise<Order | null> {
@@ -965,12 +1051,14 @@ export async function updateOrderStatus(id: string, status: string): Promise<Ord
       .eq('id', id)
       .select()
       .single();
+    if (error) console.error('updateOrderStatus', error.message);
     if (!error && data) {
-      const mapped = data as Order;
       return localWrite(() => {
         const idx = memory.orders.findIndex((o) => o.id === id);
+        const prev = idx === -1 ? undefined : (memory.orders[idx] as Order);
+        const mapped = mergeOrder(prev, { ...(data as Order), status, updated_at: now });
         if (idx === -1) memory.orders.unshift(mapped as Order & { id: string });
-        else memory.orders[idx] = { ...memory.orders[idx], ...mapped };
+        else memory.orders[idx] = mapped as Order & { id: string };
         return mapped;
       });
     }
@@ -978,8 +1066,13 @@ export async function updateOrderStatus(id: string, status: string): Promise<Ord
   return localWrite(() => {
     const idx = memory.orders.findIndex((o) => o.id === id);
     if (idx === -1) return null;
-    memory.orders[idx] = { ...memory.orders[idx], status, updated_at: now };
-    return memory.orders[idx] as Order;
+    const mapped = mergeOrder(memory.orders[idx] as Order, {
+      ...(memory.orders[idx] as Order),
+      status,
+      updated_at: now,
+    });
+    memory.orders[idx] = mapped as Order & { id: string };
+    return mapped;
   });
 }
 

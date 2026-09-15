@@ -3,6 +3,7 @@ import { verifyAdmin } from '@/lib/verify-admin';
 import { getOrders } from '@/lib/admin-db';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET() {
   const ok = await verifyAdmin();

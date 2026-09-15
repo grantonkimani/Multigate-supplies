@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
-import { StoreImage } from '@/components/StoreImage';
 import { useCart } from '@/contexts/CartContext';
 import type { Category, ProductWithOffer } from '@/lib/types';
 
@@ -24,7 +23,7 @@ function categoryTabClass(active: boolean) {
   ].join(' ');
 }
 
-function ProductCard({ product }: { product: ProductWithOffer }) {
+function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: boolean }) {
   const { addItem } = useCart();
   const [added, setAdded] = useState(false);
   const offer = product.offer;
@@ -61,12 +60,13 @@ function ProductCard({ product }: { product: ProductWithOffer }) {
     >
       <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
         {product.image_url ? (
-          <StoreImage
+          <img
             src={product.image_url}
             alt={product.name}
-            className="object-cover"
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-            quality={90}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading={eager ? 'eager' : 'lazy'}
+            decoding="async"
+            fetchPriority={eager ? 'high' : 'low'}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400 text-base">
@@ -165,7 +165,6 @@ function ProductsCatalog() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestSeq = useRef(0);
   const loadSlugRef = useRef(categorySlug);
 
@@ -224,25 +223,6 @@ function ProductsCatalog() {
     load(page, categorySlug);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
-
-  useEffect(() => {
-    if (!hasMore) return;
-    if (loadingMore || initialLoading) return;
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const first = entries[0];
-        if (!first?.isIntersecting) return;
-        setPage((prev) => prev + 1);
-      },
-      { root: null, rootMargin: '160px 0px', threshold: 0 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, initialLoading]);
 
   const sortedItems = useMemo(() => {
     const active = categories.find((c) => c.slug === categorySlug);
@@ -316,18 +296,28 @@ function ProductsCatalog() {
           <p className="mt-8 text-sm text-slate-500">No products in this view yet.</p>
         ) : (
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sortedItems.map((p) => (
-              <ProductCard key={p.id} product={p} />
+            {sortedItems.map((p, index) => (
+              <ProductCard key={p.id} product={p} eager={index < 6} />
             ))}
           </div>
         )}
 
-        {/* Sentinel for infinite loading */}
-        <div ref={sentinelRef} className="h-10" />
+        {hasMore && !initialLoading && (
+          <div className="mt-8 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setPage((prev) => prev + 1)}
+              disabled={loadingMore}
+              className="rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading…' : 'Load more products'}
+            </button>
+          </div>
+        )}
 
         {loadingMore && (
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.from({ length: 8 }).map((_, i) => (
+            {Array.from({ length: 6 }).map((_, i) => (
               <SkeletonCard key={`more-${i}`} />
             ))}
           </div>

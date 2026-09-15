@@ -5,7 +5,7 @@ import { getActiveBanners } from '@/lib/admin-db';
 import Link from 'next/link';
 import { Package, Truck, HeadphonesIcon, Shield } from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 30;
 
 const BLUE = {
   dark: '#0c4a6e',
@@ -23,8 +23,19 @@ export default async function HomePage() {
     console.error(e);
   }
 
+  const preloadUrls = banners.map((b) => b.image_url).filter((url): url is string => Boolean(url));
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: BLUE.pageBg }}>
+      {preloadUrls.map((url, i) => (
+        <link
+          key={url}
+          rel="preload"
+          as="image"
+          href={url}
+          fetchPriority={i === 0 ? 'high' : 'low'}
+        />
+      ))}
       <Header />
 
       {banners.length > 0 && <HomeBanners banners={banners} />}

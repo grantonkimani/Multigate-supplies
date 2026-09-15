@@ -6,7 +6,7 @@ const nextConfig = {
     root: path.join(__dirname),
   },
   // Enable PDFKit for server-side PDF generation
-  serverExternalPackages: ['pdfkit'],
+  serverExternalPackages: ['pdfkit', 'nodemailer'],
   images: {
     unoptimized: false,
     domains: ['localhost', 'supabase.co'],

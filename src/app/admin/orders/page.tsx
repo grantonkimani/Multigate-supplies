@@ -4,10 +4,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
 import type { Order } from '@/lib/types';
 
-const STATUSES = ['pending', 'paid', 'delivered', 'cancelled'] as const;
+const STATUSES = ['pending', 'paid', 'out_for_delivery', 'delivered', 'cancelled'] as const;
 
 function statusClass(status: string) {
   if (status === 'paid') return 'bg-green-100 text-green-800';
+  if (status === 'out_for_delivery') return 'bg-amber-100 text-amber-800';
   if (status === 'delivered') return 'bg-sky-100 text-sky-800';
   if (status === 'cancelled') return 'bg-slate-200 text-slate-700';
   return 'bg-amber-100 text-amber-800';
@@ -25,11 +26,14 @@ export default function AdminOrdersPage() {
       if (!silent && !peekAdminJson('/api/admin/orders')) setLoading(true);
     try {
       const data = await adminJson<Order[]>('/api/admin/orders', true);
-      const list = Array.isArray(data) ? data : [];
-      setOrders(list);
-      putAdminJson('/api/admin/orders', list);
+      if (!Array.isArray(data)) {
+        if (!silent) setError('Could not load orders');
+        return;
+      }
+      setOrders(data);
+      putAdminJson('/api/admin/orders', data);
     } catch {
-      if (!silent) setOrders((prev) => prev);
+      if (!silent) setError('Could not load orders');
     } finally {
       setLoading(false);
     }
@@ -61,7 +65,17 @@ export default function AdminOrdersPage() {
         setError((data.error as string) || 'Could not update status');
         return;
       }
-      setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...data, status } : o)));
+      setOrders((prev) => {
+        const items =
+          Array.isArray((data as Order).items) && (data as Order).items.length
+            ? (data as Order).items
+            : order.items;
+        const next = prev.map((o) =>
+          o.id === order.id ? { ...o, status, items, updated_at: new Date().toISOString() } : o
+        );
+        putAdminJson('/api/admin/orders', next);
+        return next;
+      });
     } catch {
       setError('Could not update status');
     } finally {
@@ -135,7 +149,7 @@ export default function AdminOrdersPage() {
                         >
                           {STATUSES.map((s) => (
                             <option key={s} value={s}>
-                              {s}
+                              {s === 'out_for_delivery' ? 'out for delivery' : s}
                             </option>
                           ))}
                         </select>

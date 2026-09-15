@@ -3,6 +3,7 @@ import { createOrder } from '@/lib/admin-db';
 import type { OrderItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
