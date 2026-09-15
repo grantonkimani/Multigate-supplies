@@ -44,6 +44,25 @@ function mailCopy(order: Order, status: NotifyStatus) {
   };
 }
 
+function mailErrorNote(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const compact = message.replace(/\s+/g, ' ').slice(0, 180);
+  return `Status saved, but the email could not be sent (${compact})`;
+}
+
+function transporter(host: string, user: string, pass: string, port: number) {
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    requireTLS: port === 587,
+    auth: { user, pass },
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
+  });
+}
+
 export async function sendOrderStatusEmail(
   order: Order,
   status: NotifyStatus
@@ -52,29 +71,33 @@ export async function sendOrderStatusEmail(
     return { sent: false, note: 'No customer email on this order' };
   }
 
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const user = process.env.SMTP_USER || MAIL_USER_DEFAULT;
-  const pass = process.env.SMTP_PASS;
-  const from = process.env.EMAIL_FROM || MAIL_FROM_DEFAULT;
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const user = (process.env.SMTP_USER || MAIL_USER_DEFAULT).trim();
+  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const from = (process.env.EMAIL_FROM || MAIL_FROM_DEFAULT).trim();
   if (!pass) {
-    return { sent: false, note: 'Email is not configured (set SMTP_PASS for Gmail)' };
+    return { sent: false, note: 'Email is not configured on this server (set SMTP_PASS for Production)' };
   }
 
-  const port = Number(process.env.SMTP_PORT || 465);
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
-
+  const preferred = Number(process.env.SMTP_PORT || 465);
+  const ports = preferred === 587 ? [587, 465] : [465, 587];
   const { subject, body } = mailCopy(order, status);
-  await transporter.sendMail({
-    from,
-    to: order.customer_email.trim(),
-    subject,
-    text: body,
-  });
 
-  return { sent: true, note: `Email sent for ${deliveryLabel(status)}` };
+  let lastError: unknown;
+  for (const port of ports) {
+    try {
+      await transporter(host, user, pass, port).sendMail({
+        from,
+        to: order.customer_email.trim(),
+        subject,
+        text: body,
+      });
+      return { sent: true, note: `Email sent for ${deliveryLabel(status)}` };
+    } catch (error) {
+      lastError = error;
+      console.error('sendOrderStatusEmail', port, error);
+    }
+  }
+
+  return { sent: false, note: mailErrorNote(lastError) };
 }

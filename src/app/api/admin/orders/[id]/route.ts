@@ -4,6 +4,7 @@ import { getOrders, updateOrderStatus } from '@/lib/admin-db';
 import { sendOrderStatusEmail } from '@/lib/send-order-email';
 
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function PATCH(
   request: NextRequest,
@@ -34,7 +35,10 @@ export async function PATCH(
         email_note = result.note;
       } catch (mailError) {
         console.error(mailError);
-        email_note = 'Status saved, but the email could not be sent';
+        email_note =
+          mailError instanceof Error
+            ? `Status saved, but the email could not be sent (${mailError.message})`
+            : 'Status saved, but the email could not be sent';
       }
     }
 
