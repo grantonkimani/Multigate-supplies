@@ -50,6 +50,25 @@ function mailErrorNote(error: unknown): string {
   return `Status saved, but the email could not be sent (${compact})`;
 }
 
+function resolveSmtpSettings() {
+  let host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  let user = (process.env.SMTP_USER || MAIL_USER_DEFAULT).trim();
+  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const from = (process.env.EMAIL_FROM || MAIL_FROM_DEFAULT).trim();
+
+  if (host.includes('@')) {
+    if (!user.includes('@')) user = host;
+    host = 'smtp.gmail.com';
+  }
+  if (/^smtp\./i.test(user) || user.toLowerCase() === 'gmail.com') {
+    user = MAIL_USER_DEFAULT;
+  }
+  if (!user.includes('@')) user = MAIL_USER_DEFAULT;
+  if (!host || host.includes('@')) host = 'smtp.gmail.com';
+
+  return { host, user, pass, from };
+}
+
 function transporter(host: string, user: string, pass: string, port: number) {
   return nodemailer.createTransport({
     host,
@@ -71,10 +90,7 @@ export async function sendOrderStatusEmail(
     return { sent: false, note: 'No customer email on this order' };
   }
 
-  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
-  const user = (process.env.SMTP_USER || MAIL_USER_DEFAULT).trim();
-  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-  const from = (process.env.EMAIL_FROM || MAIL_FROM_DEFAULT).trim();
+  const { host, user, pass, from } = resolveSmtpSettings();
   if (!pass) {
     return { sent: false, note: 'Email is not configured on this server (set SMTP_PASS for Production)' };
   }
