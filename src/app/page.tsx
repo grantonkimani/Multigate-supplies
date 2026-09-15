@@ -5,7 +5,7 @@ import { getActiveBanners } from '@/lib/admin-db';
 import Link from 'next/link';
 import { Package, Truck, HeadphonesIcon, Shield } from 'lucide-react';
 
-export const revalidate = 30;
+export const dynamic = 'force-dynamic';
 
 const BLUE = {
   dark: '#0c4a6e',
@@ -38,7 +38,7 @@ export default async function HomePage() {
       ))}
       <Header />
 
-      {banners.length > 0 && <HomeBanners banners={banners} />}
+      <HomeBanners banners={banners} />
 
       {/* Hero - blue gradient, inline so it always shows */}
       <section

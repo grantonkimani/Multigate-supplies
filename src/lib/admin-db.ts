@@ -306,7 +306,7 @@ export async function getBanners(): Promise<Banner[]> {
           .select('id,title,image_url,link_url,sort_order,is_active,created_at')
           .order('sort_order')
           .abortSignal(signal),
-      2500
+      5000
     );
     if (error && !isAbortError(error)) console.error('getBanners', error.message);
     if (!error && data) {
@@ -439,10 +439,8 @@ export async function reorderBanners(orderedIds: string[]): Promise<Banner[]> {
 }
 
 export async function getActiveBanners(): Promise<Banner[]> {
-  hydrate();
-  return ([...memory.banners] as Banner[])
-    .filter((b) => b.is_active && Boolean(b.image_url))
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const banners = await getBanners();
+  return banners.filter((b) => b.is_active !== false && Boolean(b.image_url));
 }
 
 // ---- Products ----

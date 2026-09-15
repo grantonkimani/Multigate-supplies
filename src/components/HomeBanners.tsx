@@ -4,8 +4,28 @@ import { useEffect, useState } from 'react';
 import type { Banner } from '@/lib/types';
 
 export function HomeBanners({ banners }: { banners: Banner[] }) {
-  const slides = banners.filter((b) => b.image_url);
+  const [slides, setSlides] = useState(() => banners.filter((b) => b.image_url));
   const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const next = banners.filter((b) => b.image_url);
+    if (next.length) setSlides(next);
+  }, [banners]);
+
+  useEffect(() => {
+    if (slides.length) return;
+    let cancelled = false;
+    fetch('/api/banners', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        setSlides(data.filter((b: Banner) => Boolean(b.image_url) && b.is_active !== false));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [slides.length]);
 
   useEffect(() => {
     if (slides.length < 2) return;
