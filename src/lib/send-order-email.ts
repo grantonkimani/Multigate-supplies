@@ -51,21 +51,10 @@ function mailErrorNote(error: unknown): string {
 }
 
 function resolveSmtpSettings() {
-  let host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
-  let user = (process.env.SMTP_USER || MAIL_USER_DEFAULT).trim();
-  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-  const from = (process.env.EMAIL_FROM || MAIL_FROM_DEFAULT).trim();
-
-  if (host.includes('@')) {
-    if (!user.includes('@')) user = host;
-    host = 'smtp.gmail.com';
-  }
-  if (/^smtp\./i.test(user) || user.toLowerCase() === 'gmail.com') {
-    user = MAIL_USER_DEFAULT;
-  }
-  if (!user.includes('@')) user = MAIL_USER_DEFAULT;
-  if (!host || host.includes('@')) host = 'smtp.gmail.com';
-
+  const host = 'smtp.gmail.com';
+  const user = MAIL_USER_DEFAULT;
+  const pass = (process.env.SMTP_PASS || '').replace(/[\s"']+/g, '');
+  const from = MAIL_FROM_DEFAULT;
   return { host, user, pass, from };
 }
 
@@ -94,20 +83,37 @@ export async function sendOrderStatusEmail(
   if (!pass) {
     return { sent: false, note: 'Email is not configured on this server (set SMTP_PASS for Production)' };
   }
+  if (pass.length !== 16) {
+    return {
+      sent: false,
+      note: `Gmail app password must be 16 letters (this server has ${pass.length}). Edit SMTP_PASS on Vercel Production and redeploy.`,
+    };
+  }
+
+  const { subject, body } = mailCopy(order, status);
+  const mail = { from, to: order.customer_email.trim(), subject, text: body };
+
+  try {
+    await nodemailer
+      .createTransport({
+        service: 'gmail',
+        auth: { user, pass },
+        connectionTimeout: 12_000,
+        greetingTimeout: 12_000,
+        socketTimeout: 20_000,
+      })
+      .sendMail(mail);
+    return { sent: true, note: `Email sent for ${deliveryLabel(status)}` };
+  } catch (gmailServiceError) {
+    console.error('sendOrderStatusEmail gmail service', gmailServiceError);
+  }
 
   const preferred = Number(process.env.SMTP_PORT || 465);
   const ports = preferred === 587 ? [587, 465] : [465, 587];
-  const { subject, body } = mailCopy(order, status);
-
   let lastError: unknown;
   for (const port of ports) {
     try {
-      await transporter(host, user, pass, port).sendMail({
-        from,
-        to: order.customer_email.trim(),
-        subject,
-        text: body,
-      });
+      await transporter(host, user, pass, port).sendMail(mail);
       return { sent: true, note: `Email sent for ${deliveryLabel(status)}` };
     } catch (error) {
       lastError = error;
