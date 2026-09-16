@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { Trash2 } from 'lucide-react';
 import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
 import type { Order } from '@/lib/types';
 
@@ -22,6 +23,7 @@ export default function AdminOrdersPage() {
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadOrders = useCallback(async (silent = false) => {
       if (!silent && !peekAdminJson('/api/admin/orders')) setLoading(true);
@@ -88,6 +90,38 @@ export default function AdminOrdersPage() {
     }
   }
 
+  async function handleDelete(order: Order) {
+    if (
+      !confirm(
+        `Permanently delete the order for ${order.customer_name}? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setError('');
+    setNote('');
+    setDeletingId(order.id);
+    try {
+      setOrders((prev) => {
+        const next = prev.filter((o) => o.id !== order.id);
+        putAdminJson('/api/admin/orders', next);
+        return next;
+      });
+      if (expandedId === order.id) setExpandedId(null);
+      const res = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data.error as string) || 'Could not delete order');
+        void loadOrders();
+      }
+    } catch {
+      setError('Could not delete order');
+      void loadOrders();
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   if (loading) return <p className="text-slate-500 py-8">Loading…</p>;
 
   return (
@@ -130,7 +164,7 @@ export default function AdminOrdersPage() {
                   <th className="px-4 py-3 text-sm font-semibold text-slate-800">Customer</th>
                   <th className="px-4 py-3 text-sm font-semibold text-slate-800">Total</th>
                   <th className="px-4 py-3 text-sm font-semibold text-slate-800">Status</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-slate-800 w-20" />
+                  <th className="px-4 py-3 text-sm font-semibold text-slate-800">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -163,13 +197,25 @@ export default function AdminOrdersPage() {
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
-                          className="text-sm text-sky-600 hover:underline font-medium"
-                        >
-                          {expandedId === order.id ? 'Hide' : 'Details'}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+                            className="text-sm text-sky-600 hover:underline font-medium"
+                          >
+                            {expandedId === order.id ? 'Hide' : 'Details'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(order)}
+                            disabled={deletingId === order.id || updatingId === order.id}
+                            className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
+                            aria-label={`Delete order for ${order.customer_name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {deletingId === order.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {expandedId === order.id && (

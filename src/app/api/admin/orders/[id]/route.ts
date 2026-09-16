@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdmin } from '@/lib/verify-admin';
-import { getOrders, updateOrderStatus } from '@/lib/admin-db';
+import { getOrders, updateOrderStatus, deleteOrder } from '@/lib/admin-db';
 import { sendOrderStatusEmail } from '@/lib/send-order-email';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 export async function PATCH(
   request: NextRequest,
@@ -48,5 +49,23 @@ export async function PATCH(
     const status = message === 'Invalid status' ? 400 : 500;
     console.error(e);
     return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const ok = await verifyAdmin();
+  if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { id } = await params;
+  if (!id) return NextResponse.json({ error: 'Missing order id' }, { status: 400 });
+  try {
+    const deleted = await deleteOrder(id);
+    if (!deleted) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 });
   }
 }

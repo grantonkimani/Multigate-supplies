@@ -9,5 +9,5 @@ export async function GET() {
   const ok = await verifyAdmin();
   if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const orders = await getOrders();
-  return NextResponse.json(orders);
+  return NextResponse.json(orders, { headers: { 'Cache-Control': 'no-store' } });
 }

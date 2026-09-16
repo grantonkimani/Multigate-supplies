@@ -9,6 +9,7 @@ export type LocalStore = {
   banners: (Banner & { id: string })[];
   offers: Offer[];
   deleted_product_ids: string[];
+  deleted_order_ids: string[];
 };
 
 const emptyStore = (): LocalStore => ({
@@ -18,6 +19,7 @@ const emptyStore = (): LocalStore => ({
   banners: [],
   offers: [],
   deleted_product_ids: [],
+  deleted_order_ids: [],
 });
 
 function findProjectRoot(): string {
@@ -68,6 +70,9 @@ export function loadLocalStore(): LocalStore {
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
       deleted_product_ids: Array.isArray(parsed.deleted_product_ids)
         ? parsed.deleted_product_ids.filter((id): id is string => typeof id === 'string')
+        : [],
+      deleted_order_ids: Array.isArray(parsed.deleted_order_ids)
+        ? parsed.deleted_order_ids.filter((id): id is string => typeof id === 'string')
         : [],
     };
   } catch {

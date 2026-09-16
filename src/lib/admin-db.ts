@@ -15,12 +15,14 @@ const memory = loadLocalStore();
 function hydrate() {
   const disk = loadLocalStore();
   memory.categories = disk.categories;
-  memory.orders = disk.orders;
   memory.banners = disk.banners;
   memory.offers = disk.offers;
   memory.deleted_product_ids = disk.deleted_product_ids ?? [];
-  const removed = new Set(memory.deleted_product_ids);
-  memory.products = disk.products.filter((p) => !removed.has(p.id));
+  memory.deleted_order_ids = disk.deleted_order_ids ?? [];
+  const removedProducts = new Set(memory.deleted_product_ids);
+  memory.products = disk.products.filter((p) => !removedProducts.has(p.id));
+  const removedOrders = new Set(memory.deleted_order_ids);
+  memory.orders = disk.orders.filter((o) => !removedOrders.has(o.id));
 }
 
 function orderStamp(order: { updated_at?: string; created_at?: string }) {
@@ -83,12 +85,18 @@ function mergeOrder(prev: Order | undefined, next: Order): Order {
 
 function persist() {
   const disk = loadLocalStore();
+  memory.deleted_order_ids = Array.from(
+    new Set([...(disk.deleted_order_ids ?? []), ...(memory.deleted_order_ids ?? [])])
+  );
+  const removed = new Set(memory.deleted_order_ids);
   const byId = new Map<string, Order & { id: string }>();
   for (const row of disk.orders) {
+    if (removed.has(row.id)) continue;
     const merged = mergeOrder(undefined, row) as Order & { id: string };
     byId.set(merged.id, merged);
   }
   for (const row of memory.orders) {
+    if (removed.has(row.id)) continue;
     const prev = byId.get(row.id);
     const merged = mergeOrder(prev, row) as Order & { id: string };
     byId.set(merged.id, merged);
@@ -945,8 +953,10 @@ export async function getOffersAdminRows(): Promise<
 // ---- Orders ----
 export async function getOrders(): Promise<Order[]> {
   hydrate();
+  const removed = new Set(memory.deleted_order_ids);
   const byId = new Map<string, Order>();
   for (const o of memory.orders as Order[]) {
+    if (removed.has(o.id)) continue;
     const merged = mergeOrder(byId.get(o.id), o);
     byId.set(merged.id, merged);
   }
@@ -960,14 +970,15 @@ export async function getOrders(): Promise<Order[]> {
     if (error && !isAbortError(error)) console.error('getOrders', error.message);
     if (!error && data) {
       for (const o of data as Order[]) {
+        if (removed.has(o.id)) continue;
         const merged = mergeOrder(byId.get(o.id), o);
         byId.set(merged.id, merged);
       }
     }
   }
-  const orders = Array.from(byId.values()).sort((a, b) =>
-    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
-  );
+  const orders = Array.from(byId.values())
+    .filter((o) => !removed.has(o.id))
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
   memory.orders = orders as (Order & { id: string })[];
   persist();
   return orders;
@@ -999,6 +1010,7 @@ export async function createOrder(input: {
   };
 
   localWrite(() => {
+    memory.deleted_order_ids = memory.deleted_order_ids.filter((x) => x !== order.id);
     const existing = memory.orders.find((o) => o.id === order.id);
     const merged = mergeOrder(existing, order) as Order & { id: string };
     const idx = memory.orders.findIndex((o) => o.id === order.id);
@@ -1046,6 +1058,8 @@ export async function updateOrderStatus(id: string, status: string): Promise<Ord
   if (!ORDER_STATUSES.includes(status as OrderStatus)) {
     throw new Error('Invalid status');
   }
+  hydrate();
+  if (memory.deleted_order_ids.includes(id)) return null;
   const now = new Date().toISOString();
   const supabase = dataWriteClient();
   if (supabase) {
@@ -1078,6 +1092,44 @@ export async function updateOrderStatus(id: string, status: string): Promise<Ord
     memory.orders[idx] = mapped as Order & { id: string };
     return mapped;
   });
+}
+
+export async function deleteOrder(id: string): Promise<boolean> {
+  hydrate();
+  const existing = memory.orders.some((o) => o.id === id);
+
+  const localDeleted = localWrite(() => {
+    if (!memory.deleted_order_ids.includes(id)) memory.deleted_order_ids.push(id);
+    const before = memory.orders.length;
+    memory.orders = memory.orders.filter((o) => o.id !== id);
+    return memory.orders.length < before || existing;
+  });
+
+  const supabase = dataWriteClient();
+  let remoteDeleted = !supabase;
+  if (supabase) {
+    try {
+      let lastError: { message: string } | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error } = await queryWithAbort(
+          (signal) => supabase.from('orders').delete().eq('id', id).select('id').abortSignal(signal),
+          15000
+        );
+        lastError = error;
+        if (!error) {
+          remoteDeleted = true;
+          break;
+        }
+      }
+      if (!remoteDeleted && lastError && !isAbortError(lastError)) {
+        console.error('deleteOrder supabase error:', lastError);
+      }
+    } catch (e) {
+      console.error('deleteOrder', e);
+      remoteDeleted = false;
+    }
+  }
+  return localDeleted || remoteDeleted;
 }
 
 // ---- Reports ----
