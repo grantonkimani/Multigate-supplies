@@ -15,10 +15,12 @@ const memory = loadLocalStore();
 function hydrate() {
   const disk = loadLocalStore();
   memory.categories = disk.categories;
-  memory.products = disk.products;
   memory.orders = disk.orders;
   memory.banners = disk.banners;
   memory.offers = disk.offers;
+  memory.deleted_product_ids = disk.deleted_product_ids ?? [];
+  const removed = new Set(memory.deleted_product_ids);
+  memory.products = disk.products.filter((p) => !removed.has(p.id));
 }
 
 function orderStamp(order: { updated_at?: string; created_at?: string }) {
@@ -79,13 +81,6 @@ function mergeOrder(prev: Order | undefined, next: Order): Order {
   };
 }
 
-function mergeRowsById<T extends { id: string }>(disk: T[], mem: T[]): T[] {
-  const byId = new Map<string, T>();
-  for (const row of disk) byId.set(row.id, row);
-  for (const row of mem) byId.set(row.id, { ...(byId.get(row.id) as T | undefined), ...row });
-  return Array.from(byId.values());
-}
-
 function persist() {
   const disk = loadLocalStore();
   const byId = new Map<string, Order & { id: string }>();
@@ -101,13 +96,6 @@ function persist() {
   memory.orders = Array.from(byId.values()).sort((a, b) =>
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   );
-  memory.categories = mergeRowsById(disk.categories, memory.categories);
-  memory.products = mergeRowsById(disk.products, memory.products);
-  memory.banners = mergeRowsById(disk.banners, memory.banners);
-  const offersByProduct = new Map<string, Offer>();
-  for (const row of disk.offers) offersByProduct.set(row.product_id, row);
-  for (const row of memory.offers) offersByProduct.set(row.product_id, row);
-  memory.offers = Array.from(offersByProduct.values());
   saveLocalStore(memory);
 }
 
@@ -152,7 +140,7 @@ async function queryWithAbort<T>(
     return await run(ac.signal);
   } catch (error) {
     if (ac.signal.aborted || isAbortError(error)) {
-      return { data: null, error: null };
+      return { data: null, error: { message: 'aborted' } };
     }
     throw error;
   } finally {
@@ -489,9 +477,13 @@ export async function getProducts(): Promise<Product[]> {
     );
     if (error && !isAbortError(error)) console.error('getProducts', error.message);
     if (!error && data) {
+      const removed = new Set(memory.deleted_product_ids);
       const byId = new Map<string, Product & { id: string }>();
-      for (const p of memory.products) byId.set(p.id, p);
+      for (const p of memory.products) {
+        if (!removed.has(p.id)) byId.set(p.id, p);
+      }
       for (const p of data as Product[]) {
+        if (removed.has(p.id)) continue;
         byId.set(p.id, {
           ...(p as Product & { id: string }),
           price: Number((p as Product).price),
@@ -503,10 +495,13 @@ export async function getProducts(): Promise<Product[]> {
   }
   const cats = await getCategories();
   const catById = new Map(cats.map((c) => [c.id, c]));
-  return (memory.products as Product[]).map((p) => ({
-    ...p,
-    category: catById.get(p.category_id),
-  }));
+  const removed = new Set(memory.deleted_product_ids);
+  return (memory.products as Product[])
+    .filter((p) => !removed.has(p.id))
+    .map((p) => ({
+      ...p,
+      category: catById.get(p.category_id),
+    }));
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
@@ -541,6 +536,7 @@ export async function createProduct(input: {
   };
 
   localWrite(() => {
+    memory.deleted_product_ids = memory.deleted_product_ids.filter((x) => x !== product.id);
     if (!memory.products.some((p) => p.id === product.id)) {
       memory.products.unshift(product);
     }
@@ -613,25 +609,7 @@ export async function updateProduct(
   }>
 ): Promise<Product | null> {
   const patch = productUpdatePatch(input);
-  const supabase = dataWriteClient();
-  if (supabase) {
-    const { data, error } = await supabase.from('products').update(patch).eq('id', id).select().single();
-    if (error) console.error('updateProduct', error.message);
-    if (!error && data) {
-      const mapped = {
-        ...(data as Product & { price: unknown; stock_quantity: unknown }),
-        price: Number((data as any).price),
-        stock_quantity: Number((data as any).stock_quantity),
-      } as Product;
-      return localWrite(() => {
-        const idx = memory.products.findIndex((p) => p.id === id);
-        if (idx === -1) memory.products.push(mapped as Product & { id: string });
-        else Object.assign(memory.products[idx], mapped);
-        return mapped;
-      });
-    }
-  }
-  return localWrite(() => {
+  const updated = localWrite(() => {
     const idx = memory.products.findIndex((p) => p.id === id);
     if (idx === -1) return null;
     const p = memory.products[idx];
@@ -640,32 +618,64 @@ export async function updateProduct(
       p.slug = patch.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     }
     Object.assign(p, patch);
-    return p as Product;
+    return { ...p } as Product;
   });
+  if (!updated) return null;
+
+  const supabase = dataWriteClient();
+  if (supabase) {
+    const { error } = await queryWithAbort(
+      (signal) => supabase.from('products').update(patch).eq('id', id).abortSignal(signal),
+      8000
+    );
+    if (error && !isAbortError(error)) console.error('updateProduct', error.message);
+  }
+  return updated;
 }
 
 export async function deleteProduct(id: string): Promise<boolean> {
-  const existing = await getProductById(id);
-  const supabase = dataWriteClient();
-  let remoteDeleted = false;
-  if (supabase) {
-    await supabase.from('offers').delete().eq('product_id', id);
-    const { data, error } = await supabase.from('products').delete().eq('id', id).select('id');
-    if (error) {
-      console.error('deleteProduct supabase error:', error);
-    } else {
-      remoteDeleted = (data?.length ?? 0) > 0;
-    }
-  }
+  hydrate();
+  const existing = memory.products.find((p) => p.id === id) as Product | undefined;
+
   const localDeleted = localWrite(() => {
+    if (!memory.deleted_product_ids.includes(id)) memory.deleted_product_ids.push(id);
     const before = memory.products.length;
     memory.products = memory.products.filter((p) => p.id !== id);
     memory.offers = memory.offers.filter((o) => o.product_id !== id);
-    return memory.products.length < before;
+    return memory.products.length < before || Boolean(existing);
   });
-  const deleted = remoteDeleted || localDeleted;
-  if (deleted && existing) deleteProductImagesForProduct(existing);
-  return deleted;
+
+  const supabase = dataWriteClient();
+  let remoteDeleted = !supabase;
+  if (supabase) {
+    try {
+      await queryWithAbort(
+        (signal) => supabase.from('offers').delete().eq('product_id', id).abortSignal(signal),
+        8000
+      );
+      let lastError: { message: string } | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error } = await queryWithAbort(
+          (signal) =>
+            supabase.from('products').delete().eq('id', id).select('id').abortSignal(signal),
+          15000
+        );
+        lastError = error;
+        if (!error) {
+          remoteDeleted = true;
+          break;
+        }
+      }
+      if (!remoteDeleted && lastError && !isAbortError(lastError)) {
+        console.error('deleteProduct supabase error:', lastError);
+      }
+    } catch (e) {
+      console.error('deleteProduct', e);
+      remoteDeleted = false;
+    }
+  }
+  if (existing && remoteDeleted) deleteProductImagesForProduct(existing);
+  return localDeleted || remoteDeleted;
 }
 
 // ---- Offers ----
@@ -837,62 +847,29 @@ export async function getActiveProductsPage(input: {
   const fetchLimit = limit + 1; // for hasMore
 
   hydrate();
-  const catById = new Map(memory.categories.map((c) => [c.id, c]));
+  const all = await getProducts();
+  const catById = new Map((await getCategories()).map((c) => [c.id, c]));
   const slug = (input.category_slug ?? '').trim().toLowerCase();
   const matchesCategory = (p: Product) => {
     if (!input.category_id && !slug) return true;
     if (input.category_id && p.category_id === input.category_id) return true;
-    const cat = catById.get(p.category_id);
+    const cat = p.category ?? catById.get(p.category_id);
     if (slug && cat?.slug === slug) return true;
     return false;
   };
 
-  const localFiltered = memory.products
+  const localFiltered = all
     .filter((p) => p.is_active !== false)
     .filter(matchesCategory)
     .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
 
-  if (memory.products.length > 0) {
-    const localProducts = localFiltered.slice(offset, offset + fetchLimit).map((p) => ({
-      ...p,
-      category: catById.get(p.category_id),
-    }));
-    const hasMore = localProducts.length > limit;
-    const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
-    return attachOffers(pageProducts, hasMore);
-  }
-
-  const supabase = dataWriteClient();
-  if (supabase) {
-    let query = supabase
-      .from('products')
-      .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
-      .order('created_at', { ascending: false });
-    if (input.category_id) query = query.eq('category_id', input.category_id);
-    const { data, error } = await query.range(offset, offset + fetchLimit - 1);
-    if (!error && (data?.length ?? 0) > 0) {
-      const catIds = [...new Set((data ?? []).map((p: any) => p.category_id).filter(Boolean))];
-      const { data: cats } = catIds.length
-        ? await supabase.from('categories').select('id,name,slug,description,sort_order,created_at').in('id', catIds)
-        : { data: [] as Category[] };
-      const catById = new Map((cats ?? []).map((c: any) => [c.id, c]));
-      const products = (data ?? [])
-        .filter((p: any) => p.is_active !== false)
-        .map((p: any) => ({
-          ...p,
-          price: Number(p.price),
-          stock_quantity: Number(p.stock_quantity),
-          category: catById.get(p.category_id),
-        }));
-      if (products.length > 0) {
-        const hasMore = products.length > limit;
-        const pageProducts = hasMore ? products.slice(0, limit) : products;
-        return attachOffers(pageProducts, hasMore);
-      }
-    }
-  }
-
-  return { items: [], hasMore: false };
+  const localProducts = localFiltered.slice(offset, offset + fetchLimit).map((p) => ({
+    ...p,
+    category: p.category ?? catById.get(p.category_id),
+  }));
+  const hasMore = localProducts.length > limit;
+  const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
+  return attachOffers(pageProducts, hasMore);
 }
 
 async function attachOffers(

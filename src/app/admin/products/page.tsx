@@ -139,17 +139,17 @@ export default function AdminProductsPage() {
     if (!confirm(`Permanently delete "${product.name}"? This cannot be undone.`)) return;
     setError('');
     try {
-      const res = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}`, { method: 'DELETE' });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError((d.error as string) || 'Delete failed');
-        return;
-      }
       setProducts((prev) => {
         const next = prev.filter((p) => p.id !== product.id);
         putAdminJson('/api/admin/products', next);
         return next;
       });
+      const res = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}`, { method: 'DELETE' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((d.error as string) || 'Delete failed');
+        fetchData();
+      }
     } catch {
       setError('Delete failed');
     }

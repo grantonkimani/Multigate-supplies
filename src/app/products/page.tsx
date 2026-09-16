@@ -168,12 +168,12 @@ function ProductsCatalog() {
   const requestSeq = useRef(0);
   const loadSlugRef = useRef(categorySlug);
 
-  async function load(p: number, slug: string) {
+  async function load(p: number, slug: string, quiet = false) {
     setError('');
     const seq = ++requestSeq.current;
     loadSlugRef.current = slug;
-    if (p === 1) setInitialLoading(true);
-    else setLoadingMore(true);
+    if (p === 1 && !quiet) setInitialLoading(true);
+    else if (p !== 1) setLoadingMore(true);
 
     try {
       const qs = new URLSearchParams({ page: String(p), limit: String(limit) });
@@ -214,6 +214,17 @@ function ProductsCatalog() {
     setItems([]);
     setHasMore(false);
     load(1, categorySlug);
+    const reload = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      setPage(1);
+      load(1, categorySlug, true);
+    };
+    window.addEventListener('focus', reload);
+    document.addEventListener('visibilitychange', reload);
+    return () => {
+      window.removeEventListener('focus', reload);
+      document.removeEventListener('visibilitychange', reload);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categorySlug]);
 
@@ -243,16 +254,11 @@ function ProductsCatalog() {
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-8 sm:py-12">
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-3xl font-bold text-brand mb-2">Products</h1>
-            <p className="text-lg text-slate-600">
-              Browse products. Active offers are shown instantly.
-            </p>
-          </div>
-          <div className="text-base text-slate-500">
-            {items.length ? `${items.length} loaded` : ''}
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-brand mb-2">Products</h1>
+          <p className="text-lg text-slate-600">
+            Browse products. Active offers are shown instantly.
+          </p>
         </div>
 
         {categories.length > 0 && (

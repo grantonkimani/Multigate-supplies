@@ -8,7 +8,7 @@ export async function GET() {
   const ok = await verifyAdmin();
   if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const products = await getProducts();
-  return NextResponse.json(products);
+  return NextResponse.json(products, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(request: NextRequest) {

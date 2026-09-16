@@ -8,6 +8,7 @@ export type LocalStore = {
   orders: (Order & { id: string })[];
   banners: (Banner & { id: string })[];
   offers: Offer[];
+  deleted_product_ids: string[];
 };
 
 const emptyStore = (): LocalStore => ({
@@ -16,6 +17,7 @@ const emptyStore = (): LocalStore => ({
   orders: [],
   banners: [],
   offers: [],
+  deleted_product_ids: [],
 });
 
 function findProjectRoot(): string {
@@ -64,6 +66,9 @@ export function loadLocalStore(): LocalStore {
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
       banners: Array.isArray(parsed.banners) ? parsed.banners : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
+      deleted_product_ids: Array.isArray(parsed.deleted_product_ids)
+        ? parsed.deleted_product_ids.filter((id): id is string => typeof id === 'string')
+        : [],
     };
   } catch {
     return emptyStore();

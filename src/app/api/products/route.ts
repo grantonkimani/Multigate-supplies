@@ -28,12 +28,15 @@ export async function GET(request: Request) {
       category_id: categoryId,
       category_slug: categorySlug || undefined,
     });
-    return NextResponse.json({
-      items,
-      page,
-      limit,
-      hasMore,
-    });
+    return NextResponse.json(
+      {
+        items,
+        page,
+        limit,
+        hasMore,
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: 'Failed to load products' }, { status: 500 });

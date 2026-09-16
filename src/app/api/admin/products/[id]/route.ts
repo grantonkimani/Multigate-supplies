@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdmin } from '@/lib/verify-admin';
 import { updateProduct, deleteProduct } from '@/lib/admin-db';
 
+export const dynamic = 'force-dynamic';
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
