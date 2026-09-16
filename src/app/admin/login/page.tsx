@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -38,12 +39,7 @@ export default function AdminLoginPage() {
     <div className="flex items-center justify-center min-h-screen p-4 bg-[#e8f4fc]">
       <div className="bg-white rounded-2xl shadow-xl border border-sky-200 p-8 max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-sky-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">Multigate Medical Supplies</h1>
+          <BrandLogo className="h-20 w-auto max-w-[280px] object-contain mx-auto mb-4" />
           <p className="text-sky-600 font-medium mt-2">Admin Portal</p>
         </div>
 

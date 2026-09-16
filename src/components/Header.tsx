@@ -7,6 +7,7 @@ import { MobileNav } from './MobileNav';
 import { HelpDrawer } from './HelpDrawer';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { BrandLogo } from './BrandLogo';
 import { usePathname, useRouter } from 'next/navigation';
 
 const BLUE_MAIN = '#0284c7';
@@ -76,22 +77,9 @@ export function Header() {
             </button>
             <Link
               href="/"
-              className="flex items-center gap-2.5 flex-shrink-0 min-w-0 transition-opacity duration-200 hover:opacity-90"
+              className="flex items-center flex-shrink-0 min-w-0 transition-opacity duration-200 hover:opacity-90"
             >
-              <div
-                className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center font-bold text-base shadow-sm border transition-transform duration-200 hover:scale-105 shrink-0"
-                style={{ backgroundColor: BLUE_LIGHT, color: BLUE_MID, borderColor: '#bae6fd' }}
-              >
-                M
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-base sm:text-xl font-bold leading-tight truncate" style={{ color: BLUE_MID }}>
-                  Multigate
-                </span>
-                <span className="hidden xs:block text-[10px] text-slate-500 uppercase tracking-wider truncate">
-                  Medical Supplies
-                </span>
-              </div>
+              <BrandLogo className="h-10 sm:h-12 w-auto max-w-[220px] sm:max-w-[280px] object-contain" />
             </Link>
           </div>
 

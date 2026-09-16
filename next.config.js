@@ -75,7 +75,7 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    return [{ source: '/favicon.ico', destination: '/icon.svg' }];
+    return [{ source: '/favicon.ico', destination: '/logo-mark.png' }];
   },
 };
 

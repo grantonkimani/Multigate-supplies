@@ -1,5 +1,8 @@
 import nodemailer from 'nodemailer';
+import fs from 'fs';
+import path from 'path';
 import type { Order } from './types';
+import { getProjectRoot } from './local-store';
 
 export const MAIL_FROM_DEFAULT = 'Multigate Medical Supplies <multigatemedicalsupplies@gmail.com>';
 export const MAIL_USER_DEFAULT = 'multigatemedicalsupplies@gmail.com';
@@ -91,7 +94,17 @@ export async function sendOrderStatusEmail(
   }
 
   const { subject, body } = mailCopy(order, status);
-  const mail = { from, to: order.customer_email.trim(), subject, text: body };
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#0f172a;max-width:560px;margin:0 auto">
+      <img src="cid:multigate-logo" alt="Multigate Medical Supplies Limited" width="220" style="display:block;margin:0 0 20px 0;max-width:220px;height:auto" />
+      <pre style="font-family:Arial,sans-serif;white-space:pre-wrap;font-size:15px;line-height:1.5">${body.replace(/</g, '&lt;')}</pre>
+    </div>
+  `;
+  const logoPath = path.join(getProjectRoot(), 'public', 'logo.png');
+  const attachments = fs.existsSync(logoPath)
+    ? [{ filename: 'logo.png', path: logoPath, cid: 'multigate-logo' }]
+    : [];
+  const mail = { from, to: order.customer_email.trim(), subject, text: body, html, attachments };
 
   try {
     await nodemailer

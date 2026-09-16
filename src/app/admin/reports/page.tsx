@@ -14,9 +14,15 @@ export default function AdminReportsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/admin/reports')
+    fetch('/api/admin/reports', { cache: 'no-store' })
       .then((r) => r.json())
-      .then((data) => setReport(data))
+      .then((data) => {
+        if (data && typeof data.total_orders === 'number' && Array.isArray(data.by_product)) {
+          setReport(data);
+        } else {
+          setReport(null);
+        }
+      })
       .catch(() => setReport(null))
       .finally(() => setLoading(false));
   }, []);

@@ -18,7 +18,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Multigate Medical Supplies",
   description: "Your trusted source for medical supplies and equipment.",
-  manifest: "/manifest.json",
+  icons: {
+    icon: '/logo-mark.png',
+    apple: '/logo-mark.png',
+  },
 };
 
 export const viewport = {

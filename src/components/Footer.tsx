@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Phone, Mail, MapPin } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 export function Footer() {
   return (
@@ -38,9 +39,8 @@ export function Footer() {
             </div>
           </div>
           <div className="text-center md:text-right">
-            <h3 className="text-2xl font-bold text-white mb-2">Multigate</h3>
-            <p className="text-base mt-0" style={{ color: '#bae6fd' }}>Medical Supplies &amp; Equipment</p>
-            <p className="text-sm mt-2" style={{ color: '#7dd3fc' }}>&copy; 2026 All rights reserved</p>
+            <BrandLogo className="h-16 w-auto max-w-[240px] object-contain bg-white rounded-lg p-2 ml-auto md:ml-auto mx-auto md:mx-0" />
+            <p className="text-sm mt-3" style={{ color: '#7dd3fc' }}>&copy; 2026 All rights reserved</p>
           </div>
         </div>
       </div>

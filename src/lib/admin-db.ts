@@ -79,6 +79,13 @@ function mergeOrder(prev: Order | undefined, next: Order): Order {
   };
 }
 
+function mergeRowsById<T extends { id: string }>(disk: T[], mem: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const row of disk) byId.set(row.id, row);
+  for (const row of mem) byId.set(row.id, { ...(byId.get(row.id) as T | undefined), ...row });
+  return Array.from(byId.values());
+}
+
 function persist() {
   const disk = loadLocalStore();
   const byId = new Map<string, Order & { id: string }>();
@@ -94,6 +101,13 @@ function persist() {
   memory.orders = Array.from(byId.values()).sort((a, b) =>
     String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
   );
+  memory.categories = mergeRowsById(disk.categories, memory.categories);
+  memory.products = mergeRowsById(disk.products, memory.products);
+  memory.banners = mergeRowsById(disk.banners, memory.banners);
+  const offersByProduct = new Map<string, Offer>();
+  for (const row of disk.offers) offersByProduct.set(row.product_id, row);
+  for (const row of memory.offers) offersByProduct.set(row.product_id, row);
+  memory.offers = Array.from(offersByProduct.values());
   saveLocalStore(memory);
 }
 
@@ -149,13 +163,27 @@ async function queryWithAbort<T>(
 // ---- Categories ----
 export async function getCategories(): Promise<Category[]> {
   hydrate();
-  if (memory.categories.length) return memory.categories as Category[];
+  const byId = new Map<string, Category>();
+  for (const c of memory.categories as Category[]) byId.set(c.id, c);
   const supabase = dataWriteClient();
   if (supabase) {
-    const { data, error } = await supabase.from('categories').select('id,name,slug,description,sort_order,created_at').order('sort_order');
-    if (!error && (data?.length ?? 0) > 0) return data as Category[];
+    const { data, error } = await queryWithAbort(
+      (signal) =>
+        supabase
+          .from('categories')
+          .select('id,name,slug,description,sort_order,created_at')
+          .order('sort_order')
+          .abortSignal(signal),
+      4000
+    );
+    if (error && !isAbortError(error)) console.error('getCategories', error.message);
+    if (!error && data) {
+      for (const c of data as Category[]) byId.set(c.id, c);
+    }
   }
-  return memory.categories as Category[];
+  const list = Array.from(byId.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  memory.categories = list as (Category & { id: string })[];
+  return list;
 }
 
 export async function getCategoryBySlug(slug: string): Promise<Category | null> {
@@ -313,7 +341,9 @@ export async function getBanners(): Promise<Banner[]> {
       for (const b of data as Banner[]) byId.set(b.id, b);
     }
   }
-  return Array.from(byId.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const list = Array.from(byId.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  memory.banners = list as (Banner & { id: string })[];
+  return list;
 }
 
 export async function createBanner(input: {
@@ -446,16 +476,6 @@ export async function getActiveBanners(): Promise<Banner[]> {
 // ---- Products ----
 export async function getProducts(): Promise<Product[]> {
   hydrate();
-  const catById = new Map(memory.categories.map((c) => [c.id, c]));
-  const withCategory = (list: typeof memory.products) =>
-    list.map((p) => ({
-      ...p,
-      category: catById.get(p.category_id),
-    })) as Product[];
-
-  if (memory.products.length) {
-    return withCategory(memory.products);
-  }
   const supabase = dataWriteClient();
   if (supabase) {
     const { data, error } = await queryWithAbort(
@@ -465,18 +485,28 @@ export async function getProducts(): Promise<Product[]> {
           .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
           .order('created_at', { ascending: false })
           .abortSignal(signal),
-      2500
+      4000
     );
-    if (!error && (data?.length ?? 0) > 0) {
-      return (data ?? []).map((p: any) => ({
-        ...p,
-        price: Number(p.price),
-        stock_quantity: Number(p.stock_quantity),
-        category: catById.get(p.category_id),
-      })) as Product[];
+    if (error && !isAbortError(error)) console.error('getProducts', error.message);
+    if (!error && data) {
+      const byId = new Map<string, Product & { id: string }>();
+      for (const p of memory.products) byId.set(p.id, p);
+      for (const p of data as Product[]) {
+        byId.set(p.id, {
+          ...(p as Product & { id: string }),
+          price: Number((p as Product).price),
+          stock_quantity: Number((p as Product).stock_quantity),
+        });
+      }
+      memory.products = Array.from(byId.values());
     }
   }
-  return withCategory(memory.products);
+  const cats = await getCategories();
+  const catById = new Map(cats.map((c) => [c.id, c]));
+  return (memory.products as Product[]).map((p) => ({
+    ...p,
+    category: catById.get(p.category_id),
+  }));
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
@@ -519,7 +549,7 @@ export async function createProduct(input: {
 
   const supabase = dataWriteClient();
   if (supabase) {
-    void queryWithAbort(
+    const { error } = await queryWithAbort(
       (signal) =>
         supabase
           .from('products')
@@ -538,10 +568,9 @@ export async function createProduct(input: {
             updated_at: product.updated_at,
           })
           .abortSignal(signal),
-      2500
-    ).then(({ error }) => {
-      if (error && !isAbortError(error)) console.error('createProduct', error.message);
-    });
+      8000
+    );
+    if (error && !isAbortError(error)) console.error('createProduct', error.message);
   }
 
   return product;
@@ -1090,7 +1119,7 @@ export async function getReport(): Promise<ReportRow> {
   for (const order of orders) {
     if (order.status === 'cancelled' || order.status === 'pending') continue;
     totalRevenue += order.total;
-    for (const item of order.items) {
+    for (const item of order.items ?? []) {
       totalItems += item.quantity;
       const key = item.product_name;
       if (!byProduct[key]) byProduct[key] = { quantity: 0, revenue: 0 };

@@ -3,6 +3,7 @@
 import { X, Home, Package, ShoppingCart, Truck, HelpCircle, User, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from './ui/Button';
+import { BrandLogo } from './BrandLogo';
 
 interface MobileNavProps {
   isOpen: boolean;
@@ -27,7 +28,7 @@ export function MobileNav({ isOpen, onClose, onBack, showBack }: MobileNavProps)
       <div className="mobile-drawer-backdrop fixed inset-0 bg-black/50 z-[9998]" aria-hidden onClick={onClose} />
       <div className="mobile-drawer-panel fixed top-0 left-0 h-full w-full max-w-[18rem] bg-white shadow-xl z-[9999] p-4 flex flex-col">
         <div className="flex justify-between items-center mb-4">
-          <span className="font-semibold text-slate-900">Menu</span>
+          <BrandLogo className="h-10 w-auto max-w-[180px] object-contain" />
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close" className="rounded-lg">
             <X className="h-5 w-5" />
           </Button>
