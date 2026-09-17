@@ -766,37 +766,48 @@ function computePercentOff(originalPrice: number, offerPrice: number): number {
   return Math.max(0, Math.round(pct));
 }
 
+function mapOfferRow(o: {
+  product_id?: unknown;
+  offer_price?: unknown;
+  percent_off?: unknown;
+  is_active?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+}): Offer {
+  return {
+    product_id: String(o.product_id ?? ''),
+    offer_price: Number(o.offer_price),
+    percent_off: Number(o.percent_off),
+    is_active: o.is_active !== false,
+    created_at: String(o.created_at ?? ''),
+    updated_at: String(o.updated_at ?? ''),
+  };
+}
+
+async function fetchOffersFromSupabase(): Promise<Offer[] | null> {
+  const supabase = dataWriteClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('offers')
+    .select('product_id,offer_price,percent_off,is_active,created_at,updated_at');
+  if (error) {
+    console.error('fetchOffersFromSupabase', error.message);
+    return null;
+  }
+  if (!Array.isArray(data)) return null;
+  return data.map((row) => mapOfferRow(row)).filter((o) => o.product_id);
+}
+
 export async function getOffersByProductIds(productIds: string[]): Promise<Offer[]> {
   if (!productIds.length) return [];
+  const wanted = new Set(productIds.map((id) => String(id)));
+  const remote = await fetchOffersFromSupabase();
+  if (remote) {
+    memory.offers = remote;
+    return remote.filter((o) => wanted.has(o.product_id));
+  }
   hydrate();
-  const wanted = new Set(productIds);
-  const byId = new Map<string, Offer>();
-  for (const o of memory.offers) {
-    if (wanted.has(o.product_id)) byId.set(o.product_id, o);
-  }
-  if (memory.offers.length > 0) {
-    return Array.from(byId.values());
-  }
-  const supabase = dataWriteClient();
-  if (supabase) {
-    const { data, error } = await queryWithAbort(
-      (signal) => supabase.from('offers').select('*').in('product_id', productIds).abortSignal(signal),
-      800
-    );
-    if (!error && data) {
-      for (const row of data as Offer[]) {
-        byId.set(String(row.product_id), {
-          product_id: String(row.product_id),
-          offer_price: Number(row.offer_price),
-          percent_off: Number(row.percent_off),
-          is_active: Boolean(row.is_active),
-          created_at: String(row.created_at),
-          updated_at: String(row.updated_at),
-        });
-      }
-    }
-  }
-  return Array.from(byId.values());
+  return memory.offers.filter((o) => wanted.has(o.product_id));
 }
 
 export async function getActiveOffersByProductIds(productIds: string[]): Promise<Record<string, ProductOffer>> {
@@ -857,15 +868,18 @@ export async function upsertOffersForProducts(input: {
 
   const supabase = dataWriteClient();
   if (supabase) {
-    const payload = records.map((r) => ({
-      product_id: r.product_id,
-      offer_price: r.offer_price,
-      percent_off: r.percent_off,
-      is_active: r.is_active,
-      updated_at: r.updated_at,
-    }));
-    const { error } = await supabase.from('offers').upsert(payload, { onConflict: 'product_id' });
-    if (error) console.error('upsertOffersForProducts', error.message);
+    const { error } = await supabase.from('offers').upsert(
+      records.map((r) => ({
+        product_id: r.product_id,
+        offer_price: r.offer_price,
+        percent_off: r.percent_off,
+        is_active: r.is_active,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      })),
+      { onConflict: 'product_id' }
+    );
+    if (error) throw new Error(error.message);
   }
 
   return localWrite(() => {
@@ -879,35 +893,51 @@ export async function upsertOffersForProducts(input: {
 }
 
 export async function setOfferActive(product_id: string, is_active: boolean): Promise<Offer | null> {
+  const id = decodeURIComponent(String(product_id));
+  const now = new Date().toISOString();
   const supabase = dataWriteClient();
   if (supabase) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('offers')
-      .update({ is_active, updated_at: new Date().toISOString() })
-      .eq('product_id', product_id);
-    if (error) console.error('setOfferActive', error.message);
+      .update({ is_active, updated_at: now })
+      .eq('product_id', id)
+      .select('product_id,offer_price,percent_off,is_active,created_at,updated_at')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) {
+      const mapped = mapOfferRow(data);
+      localWrite(() => {
+        const idx = memory.offers.findIndex((o) => o.product_id === id);
+        if (idx === -1) memory.offers.push(mapped);
+        else memory.offers[idx] = mapped;
+        return mapped;
+      });
+      return mapped;
+    }
   }
-
   return localWrite(() => {
-    const idx = memory.offers.findIndex((o) => o.product_id === product_id);
+    const idx = memory.offers.findIndex((o) => o.product_id === id);
     if (idx === -1) return null;
-    memory.offers[idx] = { ...memory.offers[idx], is_active, updated_at: new Date().toISOString() };
+    memory.offers[idx] = { ...memory.offers[idx], is_active, updated_at: now };
     return memory.offers[idx];
   });
 }
 
 export async function deleteOffer(product_id: string): Promise<boolean> {
+  const id = decodeURIComponent(String(product_id));
   const supabase = dataWriteClient();
+  let remoteDeleted = !supabase;
   if (supabase) {
-    const { error } = await supabase.from('offers').delete().eq('product_id', product_id);
-    if (error) console.error('deleteOffer', error.message);
+    const { error } = await supabase.from('offers').delete().eq('product_id', id);
+    if (error) throw new Error(error.message);
+    remoteDeleted = true;
   }
-  return localWrite(() => {
-    const idx = memory.offers.findIndex((o) => o.product_id === product_id);
-    if (idx === -1) return false;
-    memory.offers.splice(idx, 1);
-    return true;
+  const localDeleted = localWrite(() => {
+    const before = memory.offers.length;
+    memory.offers = memory.offers.filter((o) => o.product_id !== id);
+    return memory.offers.length < before;
   });
+  return remoteDeleted || localDeleted;
 }
 
 export async function getActiveProductsPage(input: {
@@ -990,22 +1020,12 @@ export async function getOffersAdminRows(): Promise<
   }>
 > {
   const offers = await (async () => {
-    hydrate();
-    if (memory.offers.length) return memory.offers;
-    const supabase = dataWriteClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('offers').select('*');
-      if (!error && (data?.length ?? 0) > 0) {
-        return (data ?? []).map((o: any) => ({
-          product_id: String(o.product_id),
-          offer_price: Number(o.offer_price),
-          percent_off: Number(o.percent_off),
-          is_active: Boolean(o.is_active),
-          created_at: String(o.created_at),
-          updated_at: String(o.updated_at),
-        }));
-      }
+    const remote = await fetchOffersFromSupabase();
+    if (remote) {
+      memory.offers = remote;
+      return remote;
     }
+    hydrate();
     return memory.offers;
   })();
 

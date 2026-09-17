@@ -111,7 +111,7 @@ export default function AdminOffersPage() {
   async function handleToggleActive(row: OfferAdminRow) {
     setError('');
     try {
-      const res = await fetch(`/api/admin/offers/${row.product_id}`, {
+      const res = await fetch(`/api/admin/offers/${encodeURIComponent(row.product_id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !row.is_active }),
@@ -131,7 +131,7 @@ export default function AdminOffersPage() {
     setError('');
     if (!confirm(`Remove offer for "${row.product_name}"?`)) return;
     try {
-      const res = await fetch(`/api/admin/offers/${row.product_id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/offers/${encodeURIComponent(row.product_id)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'Failed to delete offer');
