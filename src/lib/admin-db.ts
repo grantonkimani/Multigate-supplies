@@ -160,8 +160,10 @@ function mapProductRow(p: Product): Product & { id: string } {
   const urls = (p as Product).image_urls;
   return {
     ...(p as Product & { id: string }),
-    price: Number((p as Product).price),
-    stock_quantity: Number((p as Product).stock_quantity),
+    id: String((p as Product).id),
+    price: Number((p as Product).price) || 0,
+    stock_quantity: Number((p as Product).stock_quantity) || 0,
+    is_active: (p as Product).is_active !== false,
     image_urls: Array.isArray(urls) ? urls : null,
   };
 }
@@ -174,18 +176,41 @@ async function fetchProductsFromSupabase(): Promise<(Product & { id: string })[]
   const supabase = dataWriteClient();
   if (!supabase) return null;
 
-  const tries = [
-    'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at',
+  const columnSets = [
     'id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at',
+    'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at',
+    '*',
   ];
-  for (const columns of tries) {
-    const { data, error } = await supabase.from('products').select(columns).order('created_at', { ascending: false });
-    if (!error && Array.isArray(data)) {
-      return (data as unknown as Product[]).map(mapProductRow);
+
+  for (const columns of columnSets) {
+    const collected: Product[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let failed = false;
+    while (true) {
+      let query = supabase.from('products').select(columns).range(from, from + pageSize - 1);
+      query = query.order('created_at', { ascending: false });
+      let { data, error } = await query;
+      if (error) {
+        const retry = await supabase.from('products').select(columns).range(from, from + pageSize - 1);
+        data = retry.data;
+        error = retry.error;
+      }
+      if (error) {
+        if (missingImageUrlsColumn(error.message)) {
+          failed = true;
+          break;
+        }
+        console.error('fetchProductsFromSupabase', error.message);
+        return collected.length ? collected.map(mapProductRow).filter((p) => p.id) : null;
+      }
+      if (!Array.isArray(data) || data.length === 0) break;
+      collected.push(...(data as unknown as Product[]));
+      if (data.length < pageSize) break;
+      from += pageSize;
     }
-    if (error && !missingImageUrlsColumn(error.message)) {
-      console.error('fetchProductsFromSupabase', error.message);
-      break;
+    if (!failed) {
+      return collected.map(mapProductRow).filter((p) => p.id);
     }
   }
   return null;
@@ -506,21 +531,20 @@ export async function getActiveBanners(): Promise<Banner[]> {
 
 // ---- Products ----
 export async function getProducts(): Promise<Product[]> {
-  hydrate();
   const remote = await fetchProductsFromSupabase();
-  if (remote) {
-    const removed = new Set(memory.deleted_product_ids);
-    memory.products = remote.filter((p) => !removed.has(p.id));
+  if (remote && remote.length) {
+    memory.products = remote;
+  } else {
+    hydrate();
   }
   const cats = await getCategories();
   const catById = new Map(cats.map((c) => [c.id, c]));
-  const removed = new Set(memory.deleted_product_ids);
-  return (memory.products as Product[])
-    .filter((p) => !removed.has(p.id))
-    .map((p) => ({
-      ...p,
-      category: catById.get(p.category_id),
-    }));
+  const source =
+    remote && remote.length ? remote : (memory.products as Product[]);
+  return source.map((p) => ({
+    ...p,
+    category: p.category ?? catById.get(p.category_id),
+  }));
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
@@ -900,9 +924,12 @@ export async function getActiveProductsPage(input: {
   const offset = (page - 1) * limit;
   const fetchLimit = limit + 1; // for hasMore
 
-  hydrate();
   const remote = await fetchProductsFromSupabase();
-  const all = remote ?? (await getProducts());
+  let all: Product[] = remote && remote.length ? remote : [];
+  if (!all.length) {
+    const extra = await getProducts();
+    if (extra.length) all = extra;
+  }
   const cats = await getCategories();
   const catById = new Map(cats.map((c) => [c.id, c]));
   const slug = (input.category_slug ?? '').trim().toLowerCase();
@@ -914,10 +941,11 @@ export async function getActiveProductsPage(input: {
     return false;
   };
 
-  const localFiltered = all
-    .filter((p) => p.is_active !== false)
-    .filter(matchesCategory)
-    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+  const inCategory = all.filter(matchesCategory);
+  const activeInCategory = inCategory.filter((p) => p.is_active !== false);
+  const localFiltered = (activeInCategory.length ? activeInCategory : inCategory).sort((a, b) =>
+    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+  );
 
   const localProducts = localFiltered.slice(offset, offset + fetchLimit).map((p) => ({
     ...p,
@@ -925,7 +953,12 @@ export async function getActiveProductsPage(input: {
   }));
   const hasMore = localProducts.length > limit;
   const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
-  return attachOffers(pageProducts, hasMore);
+  try {
+    return await attachOffers(pageProducts, hasMore);
+  } catch (e) {
+    console.error(e);
+    return { items: pageProducts as ProductWithOffer[], hasMore };
+  }
 }
 
 async function attachOffers(

@@ -26,6 +26,13 @@ export function adminJson<T>(url: string, force = false): Promise<T> {
   const request = fetch(url, { cache: 'no-store' })
     .then(async (res) => {
       const data = (await res.json().catch(() => null)) as T;
+      if (!res.ok) {
+        const message =
+          data && typeof data === 'object' && 'error' in (data as object)
+            ? String((data as { error?: unknown }).error ?? 'Request failed')
+            : 'Request failed';
+        throw new Error(message);
+      }
       if (Array.isArray(data)) putAdminJson(url, data);
       return data;
     })

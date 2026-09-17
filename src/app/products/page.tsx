@@ -26,6 +26,7 @@ function categoryTabClass(active: boolean) {
 function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: boolean }) {
   const { addItem } = useCart();
   const [added, setAdded] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const offer = product.offer;
   const originalPrice = Number(product.price);
   const offerPrice = Number(offer?.offer_price);
@@ -36,8 +37,9 @@ function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: bo
     offerPrice > 0 &&
     Number.isFinite(originalPrice) &&
     offerPrice < originalPrice;
-  const cartPrice = hasOffer ? offerPrice : originalPrice;
+  const cartPrice = hasOffer ? offerPrice : Number.isFinite(originalPrice) ? originalPrice : 0;
   const outOfStock = Number(product.stock_quantity) <= 0;
+  const photo = !imgFailed && product.image_url ? product.image_url : '';
 
   function handleAddToCart() {
     if (outOfStock) return;
@@ -59,14 +61,15 @@ function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: bo
       }`}
     >
       <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
-        {product.image_url ? (
+        {photo ? (
           <img
-            src={product.image_url}
+            src={photo}
             alt={product.name}
             className="absolute inset-0 h-full w-full object-cover"
             loading={eager ? 'eager' : 'lazy'}
             decoding="async"
             fetchPriority={eager ? 'high' : 'low'}
+            onError={() => setImgFailed(true)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400 text-base">
@@ -88,7 +91,9 @@ function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: bo
 
         <div className="mt-3">
           {!hasOffer ? (
-            <span className="text-lg font-bold text-slate-900">KES {product.price.toLocaleString()}</span>
+            <span className="text-lg font-bold text-slate-900">
+              KES {(Number.isFinite(originalPrice) ? originalPrice : 0).toLocaleString()}
+            </span>
           ) : (
             <div className="space-y-0.5">
               <span className="text-lg font-bold" style={{ color: BLUE.mid }}>
@@ -157,7 +162,7 @@ function ProductsFallback() {
 function ProductsCatalog() {
   const searchParams = useSearchParams();
   const categorySlug = (searchParams.get('category') ?? '').trim();
-  const limit = 24;
+  const limit = 48;
   const [categories, setCategories] = useState<Category[]>([]);
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<ProductWithOffer[]>([]);
@@ -211,8 +216,7 @@ function ProductsCatalog() {
 
   useEffect(() => {
     setPage(1);
-    setItems([]);
-    setHasMore(false);
+    setHasMore(true);
     load(1, categorySlug);
     const reload = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -236,18 +240,10 @@ function ProductsCatalog() {
   }, [page]);
 
   const sortedItems = useMemo(() => {
-    const active = categories.find((c) => c.slug === categorySlug);
-    const filtered = !categorySlug
-      ? items
-      : items.filter((p) => {
-          if (active?.id && p.category_id === active.id) return true;
-          if (p.category?.slug === categorySlug) return true;
-          return false;
-        });
-    return [...filtered].sort((a, b) =>
+    return [...items].sort((a, b) =>
       String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
     );
-  }, [items, categories, categorySlug]);
+  }, [items]);
 
   return (
     <div className="min-h-screen page-bg-light">

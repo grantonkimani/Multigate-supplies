@@ -3,12 +3,17 @@ import { verifyAdmin } from '@/lib/verify-admin';
 import { getProducts, createProduct } from '@/lib/admin-db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET() {
   const ok = await verifyAdmin();
   if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const products = await getProducts();
-  return NextResponse.json(products, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(Array.isArray(products) ? products : [], {
+    headers: { 'Cache-Control': 'no-store, must-revalidate' },
+  });
 }
 
 export async function POST(request: NextRequest) {

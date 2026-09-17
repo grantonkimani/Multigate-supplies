@@ -37,8 +37,23 @@ export async function GET(request: Request) {
       },
       { headers: { 'Cache-Control': 'no-store, must-revalidate' } }
     );
-  } catch (e) {
+    } catch (e) {
     console.error(e);
+    try {
+      const { items, hasMore } = await getActiveProductsPage({
+        page,
+        limit,
+        category_slug: categorySlug || undefined,
+      });
+      if (items.length) {
+        return NextResponse.json(
+          { items, page, limit, hasMore },
+          { headers: { 'Cache-Control': 'no-store, must-revalidate' } }
+        );
+      }
+    } catch (retryError) {
+      console.error(retryError);
+    }
     return NextResponse.json({ error: 'Failed to load products' }, { status: 500 });
   }
 }

@@ -10,7 +10,7 @@ export default function AdminProductsPage() {
   const cachedCategories = peekAdminJson<Category[]>('/api/admin/categories');
   const [products, setProducts] = useState<Product[]>(Array.isArray(cachedProducts) ? cachedProducts : []);
   const [categories, setCategories] = useState<Category[]>(Array.isArray(cachedCategories) ? cachedCategories : []);
-  const [loading, setLoading] = useState(!Array.isArray(cachedProducts));
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState({
@@ -29,6 +29,7 @@ export default function AdminProductsPage() {
   const [visibleCount, setVisibleCount] = useState(40);
 
   function fetchData() {
+    setLoading(true);
     Promise.all([adminJson<Product[]>('/api/admin/products', true), adminJson<Category[]>('/api/admin/categories', true)])
       .then(([p, c]) => {
         const productsList = Array.isArray(p) ? p : [];
@@ -40,10 +41,10 @@ export default function AdminProductsPage() {
         if (categoriesList[0]) {
           setForm((f) => (f.category_id === '' ? { ...f, category_id: categoriesList[0].id } : f));
         }
+        if (!productsList.length) setError('');
       })
-      .catch(() => {
-        if (!products.length) setProducts([]);
-        if (!categories.length) setCategories([]);
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : 'Could not load products');
       })
       .finally(() => setLoading(false));
   }
@@ -226,25 +227,34 @@ export default function AdminProductsPage() {
           <h2 className="font-semibold text-slate-900">Products</h2>
           <p className="text-sm text-slate-500">{filteredProducts.length} product(s)</p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setShowForm(true);
-            setEditing(null);
-            setForm({
-              category_id: categories[0]?.id ?? '',
-              name: '',
-              description: '',
-              price: '',
-              image_url: '',
-              image_urls: [],
-              stock_quantity: '0',
-            });
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 text-white text-sm font-semibold rounded-lg hover:bg-sky-700 shadow-sm"
-        >
-          <Plus className="w-4 h-4" /> Add product
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => fetchData()}
+            className="px-3 py-2 text-sm font-medium rounded-lg border border-sky-200 text-sky-800 hover:bg-sky-50"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowForm(true);
+              setEditing(null);
+              setForm({
+                category_id: categories[0]?.id ?? '',
+                name: '',
+                description: '',
+                price: '',
+                image_url: '',
+                image_urls: [],
+                stock_quantity: '0',
+              });
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 text-white text-sm font-semibold rounded-lg hover:bg-sky-700 shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Add product
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -376,7 +386,9 @@ export default function AdminProductsPage() {
 
       <div className="bg-white rounded-2xl border-2 border-sky-100 shadow-sm overflow-hidden">
         {products.length === 0 ? (
-          <p className="p-8 text-slate-500 text-center">No products yet. Add a category first, then add products.</p>
+          <p className="p-8 text-slate-500 text-center">
+            {error ? 'Products could not be loaded. Use Refresh or try again.' : 'No products in the catalog yet.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <div className="p-3 border-b border-sky-100">
