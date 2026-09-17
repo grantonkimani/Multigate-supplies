@@ -70,20 +70,14 @@ export function Footer() {
               <div className="space-y-2 break-words text-base" style={{ color: '#e0f2fe' }}>
                 <div className="flex items-center gap-2">
                   <Phone className="h-4 w-4 flex-shrink-0" style={{ color: '#bae6fd' }} />
-                  <Link href="tel:0757567614" className="hover:text-white transition">
-                    0757567614
-                  </Link>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 flex-shrink-0" style={{ color: '#bae6fd' }} />
                   <Link href="tel:0115970558" className="hover:text-white transition">
                     Shop number: 0115 970 558
                   </Link>
                 </div>
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 flex-shrink-0" style={{ color: '#bae6fd' }} />
-                  <Link href="mailto:support@multigate.co.ke" className="hover:text-white transition">
-                    support@multigate.co.ke
+                  <Link href="mailto:multigatemedicalsupplies@gmail.com" className="hover:text-white transition">
+                    multigatemedicalsupplies@gmail.com
                   </Link>
                 </div>
                 <div className="flex items-start gap-2">

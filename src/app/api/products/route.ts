@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getActiveProductsPage, getCategoryBySlug } from '@/lib/admin-db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -16,10 +19,7 @@ export async function GET(request: Request) {
   try {
     if (!categoryId && categorySlug) {
       const category = await getCategoryBySlug(categorySlug);
-      if (!category) {
-        return NextResponse.json({ items: [], page, limit, hasMore: false });
-      }
-      categoryId = category.id;
+      if (category) categoryId = category.id;
     }
 
     const { items, hasMore } = await getActiveProductsPage({
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         limit,
         hasMore,
       },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: { 'Cache-Control': 'no-store, must-revalidate' } }
     );
   } catch (e) {
     console.error(e);

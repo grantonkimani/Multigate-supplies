@@ -156,11 +156,6 @@ async function queryWithAbort<T>(
   }
 }
 
-const PRODUCT_COLUMNS =
-  'id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at';
-const PRODUCT_COLUMNS_MIN =
-  'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at';
-
 function mapProductRow(p: Product): Product & { id: string } {
   const urls = (p as Product).image_urls;
   return {
@@ -173,6 +168,27 @@ function mapProductRow(p: Product): Product & { id: string } {
 
 function missingImageUrlsColumn(message: string) {
   return /image_urls/i.test(message);
+}
+
+async function fetchProductsFromSupabase(): Promise<(Product & { id: string })[] | null> {
+  const supabase = dataWriteClient();
+  if (!supabase) return null;
+
+  const tries = [
+    'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at',
+    'id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at',
+  ];
+  for (const columns of tries) {
+    const { data, error } = await supabase.from('products').select(columns).order('created_at', { ascending: false });
+    if (!error && Array.isArray(data)) {
+      return (data as unknown as Product[]).map(mapProductRow);
+    }
+    if (error && !missingImageUrlsColumn(error.message)) {
+      console.error('fetchProductsFromSupabase', error.message);
+      break;
+    }
+  }
+  return null;
 }
 
 // ---- Categories ----
@@ -491,37 +507,10 @@ export async function getActiveBanners(): Promise<Banner[]> {
 // ---- Products ----
 export async function getProducts(): Promise<Product[]> {
   hydrate();
-  const supabase = dataWriteClient();
-  if (supabase) {
-    let remote: Product[] | null = null;
-    for (const columns of [PRODUCT_COLUMNS, PRODUCT_COLUMNS_MIN]) {
-      const { data, error } = await queryWithAbort(
-        (signal) =>
-          supabase
-            .from('products')
-            .select(columns)
-            .order('created_at', { ascending: false })
-            .abortSignal(signal),
-        12000
-      );
-      if (!error && Array.isArray(data)) {
-        remote = data as unknown as Product[];
-        break;
-      }
-      if (error && !isAbortError(error) && !missingImageUrlsColumn(error.message)) {
-        console.error('getProducts', error.message);
-        break;
-      }
-    }
-    if (remote) {
-      const removed = new Set(memory.deleted_product_ids);
-      const byId = new Map<string, Product & { id: string }>();
-      for (const p of remote) {
-        if (removed.has(p.id)) continue;
-        byId.set(p.id, mapProductRow(p));
-      }
-      memory.products = Array.from(byId.values());
-    }
+  const remote = await fetchProductsFromSupabase();
+  if (remote) {
+    const removed = new Set(memory.deleted_product_ids);
+    memory.products = remote.filter((p) => !removed.has(p.id));
   }
   const cats = await getCategories();
   const catById = new Map(cats.map((c) => [c.id, c]));
@@ -912,8 +901,10 @@ export async function getActiveProductsPage(input: {
   const fetchLimit = limit + 1; // for hasMore
 
   hydrate();
-  const all = await getProducts();
-  const catById = new Map((await getCategories()).map((c) => [c.id, c]));
+  const remote = await fetchProductsFromSupabase();
+  const all = remote ?? (await getProducts());
+  const cats = await getCategories();
+  const catById = new Map(cats.map((c) => [c.id, c]));
   const slug = (input.category_slug ?? '').trim().toLowerCase();
   const matchesCategory = (p: Product) => {
     if (!input.category_id && !slug) return true;
