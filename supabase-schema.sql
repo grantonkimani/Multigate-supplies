@@ -25,6 +25,8 @@ create table if not exists products (
   updated_at timestamptz not null default now()
 );
 
+alter table products add column if not exists image_urls jsonb;
+
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   customer_name text not null,

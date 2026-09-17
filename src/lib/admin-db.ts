@@ -156,6 +156,25 @@ async function queryWithAbort<T>(
   }
 }
 
+const PRODUCT_COLUMNS =
+  'id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at';
+const PRODUCT_COLUMNS_MIN =
+  'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at';
+
+function mapProductRow(p: Product): Product & { id: string } {
+  const urls = (p as Product).image_urls;
+  return {
+    ...(p as Product & { id: string }),
+    price: Number((p as Product).price),
+    stock_quantity: Number((p as Product).stock_quantity),
+    image_urls: Array.isArray(urls) ? urls : null,
+  };
+}
+
+function missingImageUrlsColumn(message: string) {
+  return /image_urls/i.test(message);
+}
+
 // ---- Categories ----
 export async function getCategories(): Promise<Category[]> {
   hydrate();
@@ -474,29 +493,32 @@ export async function getProducts(): Promise<Product[]> {
   hydrate();
   const supabase = dataWriteClient();
   if (supabase) {
-    const { data, error } = await queryWithAbort(
-      (signal) =>
-        supabase
-          .from('products')
-          .select('id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at')
-          .order('created_at', { ascending: false })
-          .abortSignal(signal),
-      4000
-    );
-    if (error && !isAbortError(error)) console.error('getProducts', error.message);
-    if (!error && data) {
+    let remote: Product[] | null = null;
+    for (const columns of [PRODUCT_COLUMNS, PRODUCT_COLUMNS_MIN]) {
+      const { data, error } = await queryWithAbort(
+        (signal) =>
+          supabase
+            .from('products')
+            .select(columns)
+            .order('created_at', { ascending: false })
+            .abortSignal(signal),
+        12000
+      );
+      if (!error && Array.isArray(data)) {
+        remote = data as unknown as Product[];
+        break;
+      }
+      if (error && !isAbortError(error) && !missingImageUrlsColumn(error.message)) {
+        console.error('getProducts', error.message);
+        break;
+      }
+    }
+    if (remote) {
       const removed = new Set(memory.deleted_product_ids);
       const byId = new Map<string, Product & { id: string }>();
-      for (const p of memory.products) {
-        if (!removed.has(p.id)) byId.set(p.id, p);
-      }
-      for (const p of data as Product[]) {
+      for (const p of remote) {
         if (removed.has(p.id)) continue;
-        byId.set(p.id, {
-          ...(p as Product & { id: string }),
-          price: Number((p as Product).price),
-          stock_quantity: Number((p as Product).stock_quantity),
-        });
+        byId.set(p.id, mapProductRow(p));
       }
       memory.products = Array.from(byId.values());
     }
@@ -543,41 +565,60 @@ export async function createProduct(input: {
     updated_at: now,
   };
 
-  localWrite(() => {
+  const row = {
+    id: product.id,
+    category_id: product.category_id,
+    name: product.name,
+    slug: product.slug,
+    description: product.description,
+    price: product.price,
+    image_url: product.image_url,
+    image_urls: product.image_urls,
+    stock_quantity: product.stock_quantity,
+    is_active: true,
+    created_at: product.created_at,
+    updated_at: product.updated_at,
+  };
+
+  const supabase = dataWriteClient();
+  if (supabase) {
+    let lastError: { message: string } | null = null;
+    const payloads: Record<string, unknown>[] = [row];
+    if (row.image_urls == null) {
+      const { image_urls: _omit, ...withoutUrls } = row;
+      payloads.unshift(withoutUrls);
+    } else {
+      const { image_urls: _omit, ...withoutUrls } = row;
+      payloads.push(withoutUrls);
+    }
+    let saved = false;
+    for (const payload of payloads) {
+      const { error } = await queryWithAbort(
+        (signal) => supabase.from('products').insert(payload).abortSignal(signal),
+        15000
+      );
+      lastError = error;
+      if (!error) {
+        saved = true;
+        break;
+      }
+      if (!missingImageUrlsColumn(error.message) && !isAbortError(error)) break;
+    }
+    if (!saved) {
+      const message = lastError?.message || 'Could not save the product to the database';
+      throw new Error(
+        isAbortError(lastError) ? 'Saving the product timed out. Try again.' : message
+      );
+    }
+  }
+
+  return localWrite(() => {
     memory.deleted_product_ids = memory.deleted_product_ids.filter((x) => x !== product.id);
     if (!memory.products.some((p) => p.id === product.id)) {
       memory.products.unshift(product);
     }
     return product;
   });
-
-  const supabase = dataWriteClient();
-  if (supabase) {
-    const { error } = await queryWithAbort(
-      (signal) =>
-        supabase
-          .from('products')
-          .insert({
-            id: product.id,
-            category_id: product.category_id,
-            name: product.name,
-            slug: product.slug,
-            description: product.description,
-            price: product.price,
-            image_url: product.image_url,
-            image_urls: product.image_urls,
-            stock_quantity: product.stock_quantity,
-            is_active: true,
-            created_at: product.created_at,
-            updated_at: product.updated_at,
-          })
-          .abortSignal(signal),
-      8000
-    );
-    if (error && !isAbortError(error)) console.error('createProduct', error.message);
-  }
-
-  return product;
 }
 
 function productUpdatePatch(
@@ -616,29 +657,45 @@ export async function updateProduct(
     is_active: boolean;
   }>
 ): Promise<Product | null> {
+  hydrate();
   const patch = productUpdatePatch(input);
-  const updated = localWrite(() => {
-    const idx = memory.products.findIndex((p) => p.id === id);
-    if (idx === -1) return null;
-    const p = memory.products[idx];
-    if (typeof patch.name === 'string') {
-      p.name = patch.name;
-      p.slug = patch.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    }
-    Object.assign(p, patch);
-    return { ...p } as Product;
-  });
-  if (!updated) return null;
+  if (typeof patch.name === 'string') {
+    patch.slug = String(patch.name).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  }
 
   const supabase = dataWriteClient();
   if (supabase) {
-    const { error } = await queryWithAbort(
-      (signal) => supabase.from('products').update(patch).eq('id', id).abortSignal(signal),
-      8000
-    );
-    if (error && !isAbortError(error)) console.error('updateProduct', error.message);
+    const payloads: Record<string, unknown>[] = [patch];
+    if ('image_urls' in patch) {
+      const { image_urls: _omit, ...withoutUrls } = patch;
+      payloads.push(withoutUrls);
+    }
+    let saved = false;
+    let lastError: { message: string } | null = null;
+    for (const payload of payloads) {
+      const { error } = await queryWithAbort(
+        (signal) => supabase.from('products').update(payload).eq('id', id).abortSignal(signal),
+        15000
+      );
+      lastError = error;
+      if (!error) {
+        saved = true;
+        break;
+      }
+      if (!missingImageUrlsColumn(error.message) && !isAbortError(error)) break;
+    }
+    if (!saved && lastError && !isAbortError(lastError)) {
+      throw new Error(lastError.message);
+    }
   }
-  return updated;
+
+  return localWrite(() => {
+    const idx = memory.products.findIndex((p) => p.id === id);
+    if (idx === -1) return null;
+    const p = memory.products[idx];
+    Object.assign(p, patch);
+    return { ...p } as Product;
+  });
 }
 
 export async function deleteProduct(id: string): Promise<boolean> {
