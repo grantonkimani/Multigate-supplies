@@ -83,10 +83,7 @@ export default function AdminProductsPage() {
       description: form.description.trim() || undefined,
       price: parseFloat(form.price) || 0,
       image_url: productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls })[0] ?? null,
-      image_urls: (() => {
-        const extra = productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls }).slice(1);
-        return extra.length ? extra : null;
-      })(),
+      image_urls: productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls }).slice(1),
       stock_quantity: Number.isFinite(parseInt(form.stock_quantity, 10))
         ? parseInt(form.stock_quantity, 10)
         : 0,
@@ -94,7 +91,7 @@ export default function AdminProductsPage() {
     };
     try {
       if (editing) {
-        const res = await fetch(`/api/admin/products/${editing.id}`, {
+        const res = await fetch(`/api/admin/products/${encodeURIComponent(editing.id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -381,15 +378,17 @@ export default function AdminProductsPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           setForm((f) => {
                             const next = productPhotoUrls({
                               image_url: f.image_url,
                               image_urls: f.image_urls,
                             }).filter((u) => u !== url);
                             return { ...f, image_url: next[0] ?? '', image_urls: next.slice(1) };
-                          })
-                        }
+                          });
+                        }}
                         className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-slate-800 text-white text-xs leading-5"
                         aria-label="Remove photo"
                       >

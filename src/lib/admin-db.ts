@@ -665,7 +665,6 @@ export async function updateProduct(
     is_active: boolean;
   }>
 ): Promise<Product | null> {
-  hydrate();
   const patch = productUpdatePatch(input);
   if (typeof patch.name === 'string') {
     patch.slug = String(patch.name).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
@@ -692,8 +691,41 @@ export async function updateProduct(
       }
       if (!missingImageUrlsColumn(error.message) && !isAbortError(error)) break;
     }
-    if (!saved && lastError && !isAbortError(lastError)) {
-      throw new Error(lastError.message);
+    if (!saved) {
+      const message = lastError?.message || 'Could not update the product';
+      throw new Error(
+        isAbortError(lastError) ? 'Updating the product timed out. Try again.' : message
+      );
+    }
+
+    let row: Product | null = null;
+    const withUrls = await supabase
+      .from('products')
+      .select(
+        'id,category_id,name,slug,description,price,image_url,image_urls,stock_quantity,is_active,created_at,updated_at'
+      )
+      .eq('id', id)
+      .maybeSingle();
+    if (!withUrls.error && withUrls.data) {
+      row = withUrls.data as Product;
+    } else {
+      const withoutUrls = await supabase
+        .from('products')
+        .select(
+          'id,category_id,name,slug,description,price,image_url,stock_quantity,is_active,created_at,updated_at'
+        )
+        .eq('id', id)
+        .maybeSingle();
+      if (!withoutUrls.error && withoutUrls.data) {
+        row = { ...(withoutUrls.data as Product), image_urls: (patch.image_urls as string[] | null) ?? null };
+      }
+    }
+    if (row) {
+      const mapped = mapProductRow(row);
+      const idx = memory.products.findIndex((p) => p.id === id);
+      if (idx === -1) memory.products.unshift(mapped);
+      else memory.products[idx] = { ...memory.products[idx], ...mapped };
+      return mapped;
     }
   }
 
