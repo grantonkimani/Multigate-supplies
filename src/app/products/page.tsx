@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
+import { productPhotoUrls } from '@/lib/product-photos';
 import type { Category, ProductWithOffer } from '@/lib/types';
 
 const BLUE = {
@@ -39,15 +40,18 @@ function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: bo
     offerPrice < originalPrice;
   const cartPrice = hasOffer ? offerPrice : Number.isFinite(originalPrice) ? originalPrice : 0;
   const outOfStock = Number(product.stock_quantity) <= 0;
-  const photo = !imgFailed && product.image_url ? product.image_url : '';
+  const photos = productPhotoUrls(product);
+  const photo = !imgFailed && photos[0] ? photos[0] : '';
 
-  function handleAddToCart() {
+  function handleAddToCart(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     if (outOfStock) return;
     addItem({
       id: product.id,
       name: product.name,
       price: cartPrice,
-      image: product.image_url ?? '',
+      image: photos[0] ?? product.image_url ?? '',
       category: product.category?.name ?? '',
     });
     setAdded(true);
@@ -60,57 +64,61 @@ function ProductCard({ product, eager }: { product: ProductWithOffer; eager?: bo
         hasOffer ? 'offer-card border-sky-500' : 'border-sky-100 hover:border-sky-200'
       }`}
     >
-      <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
-        {photo ? (
-          <img
-            src={photo}
-            alt={product.name}
-            className="absolute inset-0 h-full w-full object-cover"
-            loading={eager ? 'eager' : 'lazy'}
-            decoding="async"
-            fetchPriority={eager ? 'high' : 'low'}
-            onError={() => setImgFailed(true)}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-400 text-base">
-            No Image
-          </div>
-        )}
-        {hasOffer && (
-          <div className="offer-banner">
-            Offer · -{offer?.percent_off ?? 0}% off
-          </div>
-        )}
-      </div>
-
-      <div className="p-5 flex flex-col flex-1 min-w-0">
-        {product.category?.name && (
-          <p className="text-sm font-medium text-sky-700 truncate">{product.category.name}</p>
-        )}
-        <h3 className="mt-1 font-semibold text-slate-900 text-lg leading-snug line-clamp-2">{product.name}</h3>
-
-        <div className="mt-3">
-          {!hasOffer ? (
-            <span className="text-lg font-bold text-slate-900">
-              KES {(Number.isFinite(originalPrice) ? originalPrice : 0).toLocaleString()}
-            </span>
+      <Link href={`/products/${product.id}`} className="block">
+        <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
+          {photo ? (
+            <img
+              src={photo}
+              alt={product.name}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading={eager ? 'eager' : 'lazy'}
+              decoding="async"
+              fetchPriority={eager ? 'high' : 'low'}
+              onError={() => setImgFailed(true)}
+            />
           ) : (
-            <div className="space-y-0.5">
-              <span className="text-lg font-bold" style={{ color: BLUE.mid }}>
-                KES {offerPrice.toLocaleString()}
-              </span>
-              <span className="block text-sm text-slate-500 line-through">
-                KES {originalPrice.toLocaleString()}
-              </span>
+            <div className="w-full h-full flex items-center justify-center text-slate-400 text-base">
+              No Image
+            </div>
+          )}
+          {hasOffer && (
+            <div className="offer-banner">
+              Offer · -{offer?.percent_off ?? 0}% off
             </div>
           )}
         </div>
 
+        <div className="p-5 flex flex-col flex-1 min-w-0">
+          {product.category?.name && (
+            <p className="text-sm font-medium text-sky-700 truncate">{product.category.name}</p>
+          )}
+          <h3 className="mt-1 font-semibold text-slate-900 text-lg leading-snug line-clamp-2">{product.name}</h3>
+
+          <div className="mt-3">
+            {!hasOffer ? (
+              <span className="text-lg font-bold text-slate-900">
+                KES {(Number.isFinite(originalPrice) ? originalPrice : 0).toLocaleString()}
+              </span>
+            ) : (
+              <div className="space-y-0.5">
+                <span className="text-lg font-bold" style={{ color: BLUE.mid }}>
+                  KES {offerPrice.toLocaleString()}
+                </span>
+                <span className="block text-sm text-slate-500 line-through">
+                  KES {originalPrice.toLocaleString()}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </Link>
+
+      <div className="px-5 pb-5">
         <button
           type="button"
           onClick={handleAddToCart}
           disabled={outOfStock}
-          className="mt-auto pt-4 w-full rounded-xl px-4 py-3 text-base font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full rounded-xl px-4 py-3 text-base font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ backgroundColor: added ? '#15803d' : BLUE.main }}
         >
           {outOfStock ? 'Out of stock' : added ? 'Added' : 'Add to cart'}

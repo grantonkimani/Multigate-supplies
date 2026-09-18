@@ -114,6 +114,12 @@ function localWrite<T>(fn: () => T): T {
   return result;
 }
 
+function persistCategories(list: Category[]) {
+  const disk = loadLocalStore();
+  memory.categories = list as (Category & { id: string })[];
+  saveLocalStore({ ...disk, categories: memory.categories });
+}
+
 function uuid() {
   return crypto.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -217,47 +223,36 @@ async function fetchProductsFromSupabase(): Promise<(Product & { id: string })[]
 }
 
 // ---- Categories ----
-export async function getCategories(): Promise<Category[]> {
-  hydrate();
-  const byId = new Map<string, Category>();
-  for (const c of memory.categories as Category[]) byId.set(c.id, c);
+async function fetchCategoriesFromSupabase(): Promise<Category[] | null> {
   const supabase = dataWriteClient();
-  if (supabase) {
-    const { data, error } = await queryWithAbort(
-      (signal) =>
-        supabase
-          .from('categories')
-          .select('id,name,slug,description,sort_order,created_at')
-          .order('sort_order')
-          .abortSignal(signal),
-      4000
-    );
-    if (error && !isAbortError(error)) console.error('getCategories', error.message);
-    if (!error && data) {
-      for (const c of data as Category[]) byId.set(c.id, c);
-    }
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id,name,slug,description,sort_order,created_at')
+    .order('sort_order');
+  if (error) {
+    console.error('fetchCategoriesFromSupabase', error.message);
+    return null;
   }
-  const list = Array.from(byId.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  memory.categories = list as (Category & { id: string })[];
-  return list;
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return data as Category[];
+}
+
+export async function getCategories(): Promise<Category[]> {
+  const remote = await fetchCategoriesFromSupabase();
+  if (remote && remote.length) {
+    persistCategories(remote);
+    return remote;
+  }
+  hydrate();
+  return memory.categories as Category[];
 }
 
 export async function getCategoryBySlug(slug: string): Promise<Category | null> {
   const normalized = slug.trim().toLowerCase();
   if (!normalized) return null;
-  hydrate();
-  const local = memory.categories.find((c) => c.slug === normalized);
-  if (local) return local as Category;
-  const supabase = dataWriteClient();
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('id,name,slug,description,sort_order,created_at')
-      .eq('slug', normalized)
-      .maybeSingle();
-    if (!error && data) return data as Category;
-  }
-  return null;
+  const cats = await getCategories();
+  return cats.find((c) => c.slug === normalized) ?? null;
 }
 
 export async function createCategory(input: { name: string; description?: string }): Promise<Category> {
@@ -1000,10 +995,20 @@ async function attachOffers(
 
   const items: ProductWithOffer[] = pageProducts.map((p) => {
     const offer = offersByProductId[p.id];
-    const { image_urls: _urls, ...rest } = p as Product & { category?: Category; image_urls?: string[] | null };
-    return offer ? ({ ...rest, offer } as ProductWithOffer) : (rest as ProductWithOffer);
+    return offer ? ({ ...p, offer } as ProductWithOffer) : (p as ProductWithOffer);
   });
   return { items, hasMore };
+}
+
+export async function getActiveProductById(id: string): Promise<ProductWithOffer | null> {
+  const product = await getProductById(id);
+  if (!product || product.is_active === false) return null;
+  const cats = await getCategories();
+  const category = product.category ?? cats.find((c) => c.id === product.category_id);
+  const offersByProductId = await getActiveOffersByProductIds([product.id]);
+  const offer = offersByProductId[product.id];
+  const withCategory = { ...product, category };
+  return offer ? ({ ...withCategory, offer } as ProductWithOffer) : (withCategory as ProductWithOffer);
 }
 
 export async function getOffersAdminRows(): Promise<

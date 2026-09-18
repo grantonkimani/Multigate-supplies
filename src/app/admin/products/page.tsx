@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Plus, Pencil, Trash2, Image as ImageIcon } from 'lucide-react';
 import { adminJson, peekAdminJson, putAdminJson } from '@/lib/admin-client-cache';
+import { productPhotoUrls } from '@/lib/product-photos';
 import type { Product, Category } from '@/lib/types';
 
 export default function AdminProductsPage() {
@@ -81,8 +82,11 @@ export default function AdminProductsPage() {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       price: parseFloat(form.price) || 0,
-      image_url: form.image_url.trim() || null,
-      image_urls: form.image_urls.length ? form.image_urls : null,
+      image_url: productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls })[0] ?? null,
+      image_urls: (() => {
+        const extra = productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls }).slice(1);
+        return extra.length ? extra : null;
+      })(),
       stock_quantity: Number.isFinite(parseInt(form.stock_quantity, 10))
         ? parseInt(form.stock_quantity, 10)
         : 0,
@@ -158,11 +162,19 @@ export default function AdminProductsPage() {
 
   async function handleImageFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
+    const remaining = Math.max(
+      0,
+      2 - productPhotoUrls({ image_url: form.image_url, image_urls: form.image_urls }).length
+    );
+    if (remaining === 0) {
+      setError('A product can have two photos. Remove one first.');
+      return;
+    }
     setError('');
     setUploading(true);
     try {
       const uploaded: string[] = [];
-      for (const file of Array.from(fileList)) {
+      for (const file of Array.from(fileList).slice(0, remaining)) {
         const body = new FormData();
         body.append('file', file);
         const res = await fetch('/api/admin/uploads/product-image', { method: 'POST', body });
@@ -175,13 +187,11 @@ export default function AdminProductsPage() {
       }
       if (!uploaded.length) return;
       setForm((f) => {
-        const extra = [...f.image_urls];
-        let primary = f.image_url;
-        for (const url of uploaded) {
-          if (!primary) primary = url;
-          else if (url !== primary && !extra.includes(url)) extra.push(url);
-        }
-        return { ...f, image_url: primary, image_urls: extra };
+        const next = productPhotoUrls({
+          image_url: f.image_url,
+          image_urls: [...f.image_urls, ...uploaded],
+        });
+        return { ...f, image_url: next[0] ?? '', image_urls: next.slice(1) };
       });
     } catch {
       setError('Image upload failed');
@@ -199,11 +209,21 @@ export default function AdminProductsPage() {
       description: p.description ?? '',
       price: String(p.price),
       image_url: p.image_url ?? '',
-      image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
+      image_urls: productPhotoUrls(p).slice(1),
       stock_quantity: String(p.stock_quantity),
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+
+  const categoryOptions = useMemo(() => {
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    for (const p of products) {
+      if (p.category?.id && !byId.has(p.category.id)) byId.set(p.category.id, p.category);
+    }
+    return Array.from(byId.values()).sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)
+    );
+  }, [categories, products]);
 
   const previewUrls = [form.image_url, ...form.image_urls].filter((u, i, arr) => u && arr.indexOf(u) === i);
 
@@ -277,7 +297,7 @@ export default function AdminProductsPage() {
                 required
               >
                 <option value="">Select category</option>
-                {categories.map((c) => (
+                {categoryOptions.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
@@ -298,8 +318,8 @@ export default function AdminProductsPage() {
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-                rows={2}
-                placeholder="Optional description"
+                rows={6}
+                placeholder="Full product description. Put each point on a new line."
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -342,30 +362,61 @@ export default function AdminProductsPage() {
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Choose images from this device (JPEG, PNG, WebP, GIF, AVIF, max 8MB). They stay until the product is deleted.
+                Add up to two photos (JPEG, PNG, WebP, GIF, AVIF, max 8MB). The first photo is the main shop photo.
               </p>
               {uploading && <p className="mt-1 text-xs text-sky-700">Uploading…</p>}
               {previewUrls.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {previewUrls.map((url) => (
-                    <img
-                      key={url}
-                      src={url}
-                      alt=""
-                      className="w-16 h-16 object-cover rounded-lg border border-sky-100 bg-slate-100"
-                      loading="lazy"
-                      decoding="async"
-                    />
+                  {previewUrls.map((url, index) => (
+                    <div key={url} className="relative">
+                      <img
+                        src={url}
+                        alt=""
+                        className="w-20 h-20 object-cover rounded-lg border border-sky-100 bg-slate-100"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        {index === 0 ? 'Main' : '2'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => {
+                            const next = productPhotoUrls({
+                              image_url: f.image_url,
+                              image_urls: f.image_urls,
+                            }).filter((u) => u !== url);
+                            return { ...f, image_url: next[0] ?? '', image_urls: next.slice(1) };
+                          })
+                        }
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-slate-800 text-white text-xs leading-5"
+                        aria-label="Remove photo"
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
-              <label className="block text-sm font-medium text-slate-700 mt-3 mb-1">Or paste image URL</label>
+              <label className="block text-sm font-medium text-slate-700 mt-3 mb-1">Photo 1 URL</label>
               <input
                 type="text"
                 value={form.image_url}
                 onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                 placeholder="https://… or /uploads/products/…"
+              />
+              <label className="block text-sm font-medium text-slate-700 mt-3 mb-1">Photo 2 URL</label>
+              <input
+                type="text"
+                value={form.image_urls[0] ?? ''}
+                onChange={(e) => {
+                  const value = e.target.value.trim();
+                  setForm((f) => ({ ...f, image_urls: value ? [value] : [] }));
+                }}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                placeholder="Optional second photo"
               />
             </div>
             <div className="flex gap-2">
