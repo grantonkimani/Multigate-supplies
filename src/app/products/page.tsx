@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
@@ -168,8 +168,10 @@ function ProductsFallback() {
 }
 
 function ProductsCatalog() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const categorySlug = (searchParams.get('category') ?? '').trim();
+  const qParam = (searchParams.get('q') ?? '').trim();
   const limit = 48;
   const [categories, setCategories] = useState<Category[]>([]);
   const [page, setPage] = useState(1);
@@ -178,23 +180,41 @@ function ProductsCatalog() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [qDraft, setQDraft] = useState(qParam);
   const requestSeq = useRef(0);
-  const loadSlugRef = useRef(categorySlug);
+  const loadKeyRef = useRef(`${categorySlug}|${qParam}`);
 
-  async function load(p: number, slug: string, quiet = false) {
+  function catalogHref(next: { category?: string; q?: string } = {}) {
+    const qs = new URLSearchParams();
+    const category = next.category !== undefined ? next.category : categorySlug;
+    const q = next.q !== undefined ? next.q : qParam;
+    if (category) qs.set('category', category);
+    if (q) qs.set('q', q);
+    const s = qs.toString();
+    return s ? `/products?${s}` : '/products';
+  }
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    router.push(catalogHref({ q: qDraft.trim() }));
+  }
+
+  async function load(p: number, slug: string, q: string, quiet = false) {
     setError('');
     const seq = ++requestSeq.current;
-    loadSlugRef.current = slug;
+    const key = `${slug}|${q}`;
+    loadKeyRef.current = key;
     if (p === 1 && !quiet) setInitialLoading(true);
     else if (p !== 1) setLoadingMore(true);
 
     try {
       const qs = new URLSearchParams({ page: String(p), limit: String(limit) });
       if (slug) qs.set('category', slug);
+      if (q) qs.set('q', q);
       const res = await fetch(`/api/products?${qs.toString()}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to load products');
-      if (seq !== requestSeq.current || loadSlugRef.current !== slug) return;
+      if (seq !== requestSeq.current || loadKeyRef.current !== key) return;
 
       const newItems = Array.isArray(data.items) ? (data.items as ProductWithOffer[]) : [];
       setItems((prev) => {
@@ -223,13 +243,14 @@ function ProductsCatalog() {
   }, []);
 
   useEffect(() => {
+    setQDraft(qParam);
     setPage(1);
     setHasMore(true);
-    load(1, categorySlug);
+    load(1, categorySlug, qParam);
     const reload = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       setPage(1);
-      load(1, categorySlug, true);
+      load(1, categorySlug, qParam, true);
     };
     window.addEventListener('focus', reload);
     document.addEventListener('visibilitychange', reload);
@@ -238,12 +259,12 @@ function ProductsCatalog() {
       document.removeEventListener('visibilitychange', reload);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categorySlug]);
+  }, [categorySlug, qParam]);
 
   useEffect(() => {
     if (page === 1) return;
     if (!hasMore) return;
-    load(page, categorySlug);
+    load(page, categorySlug, qParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
@@ -265,11 +286,28 @@ function ProductsCatalog() {
           </p>
         </div>
 
+        <form onSubmit={handleSearch} className="mt-6 flex gap-2 max-w-xl">
+          <input
+            type="search"
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
+            placeholder="Search products"
+            className="min-w-0 flex-1 rounded-xl border border-sky-200 bg-white px-3 py-2.5 text-slate-900"
+          />
+          <button
+            type="submit"
+            className="rounded-xl px-5 py-2.5 text-base font-semibold text-white shrink-0"
+            style={{ backgroundColor: BLUE.main }}
+          >
+            Search
+          </button>
+        </form>
+
         {categories.length > 0 && (
           <div className="mt-8 overflow-x-auto pb-1 -mx-1 px-1">
             <div className="inline-flex min-w-full sm:min-w-0 flex-nowrap sm:flex-wrap gap-2 p-2 rounded-2xl bg-white border-2 border-sky-100 shadow-sm">
             <Link
-              href="/products"
+              href={catalogHref({ category: '' })}
               className={categoryTabClass(!categorySlug)}
             >
               All
@@ -279,7 +317,7 @@ function ProductsCatalog() {
               return (
                 <Link
                   key={cat.id}
-                  href={`/products?category=${encodeURIComponent(cat.slug)}`}
+                  href={catalogHref({ category: cat.slug })}
                   className={categoryTabClass(active)}
                 >
                   {cat.name}
@@ -303,7 +341,11 @@ function ProductsCatalog() {
             ))}
           </div>
         ) : sortedItems.length === 0 ? (
-          <p className="mt-8 text-sm text-slate-500">No products in this view yet.</p>
+          <p className="mt-8 text-sm text-slate-500">
+            {qParam || categorySlug
+              ? 'No products match this search.'
+              : 'No products in this view yet.'}
+          </p>
         ) : (
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {sortedItems.map((p, index) => (

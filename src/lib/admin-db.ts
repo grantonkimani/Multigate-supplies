@@ -972,6 +972,9 @@ export async function getActiveProductsPage(input: {
   limit: number;
   category_id?: string;
   category_slug?: string;
+  q?: string;
+  min_price?: number;
+  max_price?: number;
 }): Promise<{
   items: ProductWithOffer[];
   hasMore: boolean;
@@ -990,6 +993,11 @@ export async function getActiveProductsPage(input: {
   const cats = await getCategories();
   const catById = new Map(cats.map((c) => [c.id, c]));
   const slug = (input.category_slug ?? '').trim().toLowerCase();
+  const query = (input.q ?? '').trim().toLowerCase();
+  const minPrice = Number(input.min_price);
+  const maxPrice = Number(input.max_price);
+  const hasMin = Number.isFinite(minPrice) && minPrice >= 0;
+  const hasMax = Number.isFinite(maxPrice) && maxPrice >= 0;
   const matchesCategory = (p: Product) => {
     if (!input.category_id && !slug) return true;
     if (input.category_id && p.category_id === input.category_id) return true;
@@ -1000,22 +1008,51 @@ export async function getActiveProductsPage(input: {
 
   const inCategory = all.filter(matchesCategory);
   const activeInCategory = inCategory.filter((p) => p.is_active !== false);
-  const localFiltered = (activeInCategory.length ? activeInCategory : inCategory).sort((a, b) =>
-    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
-  );
-
-  const localProducts = localFiltered.slice(offset, offset + fetchLimit).map((p) => ({
+  let pool = (activeInCategory.length ? activeInCategory : inCategory).map((p) => ({
     ...p,
     category: p.category ?? catById.get(p.category_id),
   }));
-  const hasMore = localProducts.length > limit;
-  const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
+  if (query) {
+    pool = pool.filter(
+      (p) =>
+        p.name.toLowerCase().includes(query) ||
+        (p.description ?? '').toLowerCase().includes(query)
+    );
+  }
+
+  let priced = pool as ProductWithOffer[];
   try {
-    return await attachOffers(pageProducts, hasMore);
+    const attached = await attachOffers(pool, false);
+    priced = attached.items;
   } catch (e) {
     console.error(e);
-    return { items: pageProducts as ProductWithOffer[], hasMore };
   }
+  if (hasMin || hasMax) {
+    priced = priced.filter((p) => {
+      const originalPrice = Number(p.price);
+      const offerPrice = Number(p.offer?.offer_price);
+      const hasOffer =
+        Boolean(p.offer) &&
+        p.offer?.is_active !== false &&
+        Number.isFinite(offerPrice) &&
+        offerPrice > 0 &&
+        Number.isFinite(originalPrice) &&
+        offerPrice < originalPrice;
+      const amount = hasOffer ? offerPrice : Number.isFinite(originalPrice) ? originalPrice : 0;
+      if (hasMin && amount < minPrice) return false;
+      if (hasMax && amount > maxPrice) return false;
+      return true;
+    });
+  }
+
+  const localFiltered = priced.sort((a, b) =>
+    String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+  );
+
+  const localProducts = localFiltered.slice(offset, offset + fetchLimit);
+  const hasMore = localProducts.length > limit;
+  const pageProducts = hasMore ? localProducts.slice(0, limit) : localProducts;
+  return { items: pageProducts, hasMore };
 }
 
 async function attachOffers(
